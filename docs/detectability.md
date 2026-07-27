@@ -42,6 +42,32 @@ Diffusion theory is more reliable here, not less, which means the analytic
 machinery transfers with the approximations in better shape than the people
 who developed them enjoyed.
 
+## The figures
+
+![What limits penetration](figures/detect-penetration.png)
+
+Pure ice reaches nearly two metres at 390 nm. Each decade of black carbon costs
+about a factor of three, and above 700 nm every loading collapses onto the same
+curve — there the ice outabsorbs any trace impurity, so cleanliness stops
+mattering and nothing penetrates far anyway.
+
+![The sensitivity kernel](figures/detect-banana.png)
+
+Where the detected light has actually been, at three separations. The banana
+grows with `rho` and its peak sits at `rho/3.1`, `rho/3.1`, `rho/3.4` — printed
+on the panels, computed rather than quoted. Note the colour scale is
+logarithmic over five decades: the true maximum is at the source and detector,
+where a point-source fluence diverges, so a linear scale shows two bright dots
+and no banana at all.
+
+![Detection depth map](figures/detect-map.png)
+
+Detection depth over cleanliness and wavelength, with real snowpacks marked.
+The usable region is the bottom-left corner — clean snow, blue light — and it
+shrinks fast in every direction.
+
+![The measurement, drawn](figures/detect-geometry.png)
+
 ## The regime
 
 From the v1 engine, 100 um grains, 300 kg/m³:
