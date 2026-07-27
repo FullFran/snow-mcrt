@@ -4,8 +4,14 @@ Where this project could go after v1, what the physics allows, and what the
 engine would have to become. Written before any of it is built, so the
 constraints are on the record rather than discovered halfway through.
 
-**Status:** exploratory. No code exists for any of this. Every number below is
-produced by the v1 engine or by diffusion theory.
+**Status:** exploratory, and now partly built. The diffusion theory this note
+rests on is implemented and tested in `snow_mcrt.domain.diffusion` — fluence,
+diffuse reflectance, the sensitivity kernel, the extrapolated boundary — so
+every figure and every number below is produced by code under test rather than
+by arithmetic in a margin.
+
+What does *not* exist: three-dimensional transport, ray-object intersection,
+detectors, or any object in any snowpack. Those are scoped at the end.
 
 **Updated with the real dataset.** An earlier version of this note used
 order-of-magnitude placeholders for the ice absorption. Warren & Brandt (2008)
@@ -41,6 +47,32 @@ Snow is a *better* diffuser than tissue: `omega` closer to 1, comparable `g`.
 Diffusion theory is more reliable here, not less, which means the analytic
 machinery transfers with the approximations in better shape than the people
 who developed them enjoyed.
+
+## The figures
+
+![What limits penetration](figures/detect-penetration.png)
+
+Pure ice reaches nearly two metres at 390 nm. Each decade of black carbon costs
+about a factor of three, and above 700 nm every loading collapses onto the same
+curve — there the ice outabsorbs any trace impurity, so cleanliness stops
+mattering and nothing penetrates far anyway.
+
+![The sensitivity kernel](figures/detect-banana.png)
+
+Where the detected light has actually been, at three separations. The banana
+grows with `rho` and its peak sits at `rho/3.1`, `rho/3.1`, `rho/3.4` — printed
+on the panels, computed rather than quoted. Note the colour scale is
+logarithmic over five decades: the true maximum is at the source and detector,
+where a point-source fluence diverges, so a linear scale shows two bright dots
+and no banana at all.
+
+![Detection depth map](figures/detect-map.png)
+
+Detection depth over cleanliness and wavelength, with real snowpacks marked.
+The usable region is the bottom-left corner — clean snow, blue light — and it
+shrinks fast in every direction.
+
+![The measurement, drawn](figures/detect-geometry.png)
 
 ## The regime
 
