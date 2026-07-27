@@ -188,6 +188,52 @@ smooth background. So `SnowLayer` defaults to `sigma_g = 1.5`, and reaching
 monodisperse behaviour requires passing `1.0` deliberately. Defaults should be
 the safe choice, not the simple one.
 
+### The quadrature must have an even number of nodes
+
+This one took a second pass to find, because the first fix looked like it had
+worked and had not.
+
+A symmetric quadrature with an *odd* node count puts a node exactly on the
+median radius, and the log-normal gives that node the largest weight in the
+distribution. When the median radius happens to sit on a resonance — as 100 um
+grains do at 676.7 nm — the resonance survives the averaging that was supposed
+to destroy it. Measured at that wavelength, against smooth neighbours of 4.4e-5
+and 5.5e-5:
+
+| nodes | co-albedo | |
+| ----- | --------- | - |
+| 16 | 4.70e-05 | even |
+| **17** | **6.65e-05** | odd — median sampled |
+| 32 | 4.68e-05 | even |
+| **33** | **5.66e-05** | odd — median sampled |
+| 48 | 4.72e-05 | even |
+
+`LogNormalGrainSizes` therefore *refuses* an odd node count rather than
+accepting it and returning a quietly contaminated answer.
+
+### What is left, and why more nodes will not fix it
+
+Sub-percent structure remains in the co-albedo, and it is honest to say so.
+
+It is not a bug and it is not a quadrature artefact. Perturbing `x` by one part
+in `1e8` moves `Q_abs` smoothly and monotonically — we are on the flank of a
+genuinely sharp resonance, not in numerical noise. Against the geometric-optics
+limit, `Q_abs / 4kx` comes out at 0.86, 0.90 and 0.84 across three size
+parameters: consistent, so the magnitudes are right.
+
+Throwing nodes at it does not help. Roughness measured over 700–760 nm: 0.0225
+at 16 nodes, 0.0177 at 256. A twentyfold cost for a fifth off. The resonance
+comb is dense enough that any finite quadrature lands on some of it, and the
+convergence is not monotonic because different node counts hit different
+resonances.
+
+At the level it survives — a fraction of a percent in `1 - omega`, which is
+around 0.005 in albedo — it is invisible in the figures and well below the
+accuracy of everything else in the chain. `Q_abs` is a difference of two
+numbers near 2.02 that differ by 7e-5, so roughly four and a half decimal
+digits are lost to cancellation before anything else happens. That, not the
+quadrature, is the floor.
+
 Two consequences worth stating:
 
 - Number density is fixed by mass, so it is `<r³>` that enters, not the median

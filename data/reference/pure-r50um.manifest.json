@@ -1,7 +1,7 @@
 {
   "label": "pure-r50um",
-  "created_utc": "2026-07-27T20:02:14+00:00",
-  "git_commit": "248fe71bed5d4fbe802d0e570920e5a75926c4b0-dirty",
+  "created_utc": "2026-07-27T20:23:29+00:00",
+  "git_commit": "a4db790346895c36b0340956bc11a692de617e6f-dirty",
   "python": "3.10.12",
   "numpy": "2.2.6",
   "optical_constants": "Warren & Brandt 2008",
@@ -32,7 +32,7 @@
       2499.9999999999995
     ],
     "n_points": 160,
-    "albedo_min": 0.020946980234973746,
-    "albedo_max": 0.9986158479458546
+    "albedo_min": 0.020932014551584128,
+    "albedo_max": 0.9986036345051633
   }
 }
