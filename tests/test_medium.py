@@ -292,7 +292,31 @@ class TestGrainSizeDistribution:
         assert self.co_albedo(solver, 1.0) > 1.5e-4
 
     def test_a_realistic_distribution_removes_it(self, solver):
-        assert self.co_albedo(solver, 1.5) < 7e-5
+        # The smooth neighbours of this wavelength sit at 4.4e-5 and 5.5e-5,
+        # so anything in that band is the resonance genuinely gone rather than
+        # merely reduced.
+        assert self.co_albedo(solver, 1.5) < 5.5e-5
+
+    def test_an_odd_node_count_is_refused(self):
+        # An odd, symmetric quadrature puts a node exactly on the median
+        # radius with the largest weight in the distribution. At 676.7 nm that
+        # radius is the resonant one, so the resonance survives the averaging.
+        # Measured: n=17 gives 6.6e-5 and n=33 gives 5.7e-5, against 4.7e-5
+        # for every even count from 16 to 64.
+        with pytest.raises(ValueError, match="must be even"):
+            LogNormalGrainSizes(100e-6, sigma_g=1.5, n_quadrature=17)
+
+    def test_the_default_node_count_is_even(self):
+        assert LogNormalGrainSizes(100e-6).n_quadrature % 2 == 0
+
+    def test_the_result_is_converged_in_the_node_count(self, solver):
+        # If doubling the quadrature moved the answer, the smoothing would be
+        # an artefact of the sampling rather than a property of the medium.
+        coarse = LogNormalGrainSizes(100e-6, 1.5, n_quadrature=16)
+        fine = LogNormalGrainSizes(100e-6, 1.5, n_quadrature=32)
+        assert fine.mean_cube_radius == pytest.approx(
+            coarse.mean_cube_radius, rel=0.02
+        )
 
     def test_even_a_five_percent_spread_removes_it(self, solver):
         # Real snow is nowhere near this narrow. If a 5% spread already

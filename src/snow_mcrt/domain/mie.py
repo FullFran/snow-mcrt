@@ -143,7 +143,7 @@ class LogNormalGrainSizes:
 
     median_radius_m: float
     sigma_g: float = 1.5
-    n_quadrature: int = 17
+    n_quadrature: int = 16
     n_sigma: float = 3.0
 
     def __post_init__(self) -> None:
@@ -156,6 +156,22 @@ class LogNormalGrainSizes:
             )
         if self.n_quadrature < 2:
             raise ValueError("need at least two quadrature points")
+        if self.n_quadrature % 2 != 0:
+            # Not a stylistic preference. An odd, symmetric node count puts a
+            # node exactly on the median radius and gives it the largest
+            # weight in the distribution. When that radius happens to sit on a
+            # resonance -- as 100 um grains do at 676.7 nm -- the resonance
+            # survives the averaging it was supposed to be destroyed by.
+            #
+            # Measured at that wavelength, against smooth neighbours of
+            # 4.4e-5 and 5.5e-5: n=17 gives 6.6e-5 and n=33 gives 5.7e-5,
+            # while every even count from 16 to 64 lands on 4.7e-5.
+            raise ValueError(
+                f"n_quadrature must be even, got {self.n_quadrature}. An odd "
+                f"node count samples the median radius with maximum weight, "
+                f"which reintroduces the sphere resonances this distribution "
+                f"exists to average away."
+            )
 
     def radii_and_weights(self) -> tuple[np.ndarray, np.ndarray]:
         """Quadrature radii and their number-fraction weights.
