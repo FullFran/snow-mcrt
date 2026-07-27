@@ -60,6 +60,9 @@ def style_axes(ax, xlabel: str, ylabel: str, title: str, subtitle: str = "") -> 
     ax.set_xlim(300, 2500)
     ax.set_xticks([300, 400, 600, 800, 1000, 1500, 2000, 2500])
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    # A log axis volunteers minor tick labels like "6 x 10^2" that collide
+    # with the major ones. Only the majors are wanted here.
+    ax.get_xaxis().set_minor_formatter(matplotlib.ticker.NullFormatter())
     ax.set_xlabel(xlabel, color=INK)
     ax.set_ylabel(ylabel, color=INK)
     ax.grid(True, which="major", color=GRID, linewidth=0.7, alpha=0.9)
