@@ -1,0 +1,39 @@
+{
+  "label": "mc-spotcheck-r100um",
+  "created_utc": "2026-07-27T20:06:26+00:00",
+  "git_commit": "248fe71bed5d4fbe802d0e570920e5a75926c4b0-dirty",
+  "python": "3.10.12",
+  "numpy": "2.2.6",
+  "optical_constants": "Warren & Brandt 2008",
+  "config": {
+    "wavelengths_nm": [
+      1000.0,
+      1300.0,
+      1600.0,
+      2000.0
+    ],
+    "grain_radius_m": 0.0001,
+    "snow_density": 300.0,
+    "black_carbon_ng_per_g": 0.0,
+    "mineral_dust_ng_per_g": 0.0,
+    "method": "monte-carlo",
+    "transport": {
+      "n_photons": 20000,
+      "seed": 1,
+      "max_scatters": 100000,
+      "roulette_threshold": 0.0001,
+      "roulette_survival": 0.1,
+      "delta_scaled": true
+    },
+    "label": "mc-spotcheck-r100um"
+  },
+  "summary": {
+    "wavelength_nm": [
+      1000.0,
+      2000.0
+    ],
+    "n_points": 4,
+    "albedo_min": 0.009182772271094064,
+    "albedo_max": 0.7027068108501567
+  }
+}

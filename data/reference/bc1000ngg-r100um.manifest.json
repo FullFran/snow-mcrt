@@ -1,0 +1,38 @@
+{
+  "label": "bc1000ngg-r100um",
+  "created_utc": "2026-07-27T20:06:24+00:00",
+  "git_commit": "248fe71bed5d4fbe802d0e570920e5a75926c4b0-dirty",
+  "python": "3.10.12",
+  "numpy": "2.2.6",
+  "optical_constants": "Warren & Brandt 2008",
+  "config": {
+    "wavelengths_nm": {
+      "min": 300.0000000000001,
+      "max": 2499.9999999999995,
+      "count": 160
+    },
+    "grain_radius_m": 0.0001,
+    "snow_density": 300.0,
+    "black_carbon_ng_per_g": 1000.0,
+    "mineral_dust_ng_per_g": 0.0,
+    "method": "analytic",
+    "transport": {
+      "n_photons": 100000,
+      "seed": 0,
+      "max_scatters": 100000,
+      "roulette_threshold": 0.0001,
+      "roulette_survival": 0.1,
+      "delta_scaled": true
+    },
+    "label": "bc1000ngg-r100um"
+  },
+  "summary": {
+    "wavelength_nm": [
+      300.0000000000001,
+      2499.9999999999995
+    ],
+    "n_points": 160,
+    "albedo_min": 0.009410245792772054,
+    "albedo_max": 0.8589318115594947
+  }
+}
