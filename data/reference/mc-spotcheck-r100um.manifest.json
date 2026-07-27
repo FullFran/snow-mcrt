@@ -1,7 +1,7 @@
 {
   "label": "mc-spotcheck-r100um",
-  "created_utc": "2026-07-27T20:06:26+00:00",
-  "git_commit": "248fe71bed5d4fbe802d0e570920e5a75926c4b0-dirty",
+  "created_utc": "2026-07-27T20:27:17+00:00",
+  "git_commit": "a4db790346895c36b0340956bc11a692de617e6f-dirty",
   "python": "3.10.12",
   "numpy": "2.2.6",
   "optical_constants": "Warren & Brandt 2008",
@@ -33,7 +33,7 @@
       2000.0
     ],
     "n_points": 4,
-    "albedo_min": 0.009182772271094064,
-    "albedo_max": 0.7027068108501567
+    "albedo_min": 0.009181900545340996,
+    "albedo_max": 0.7016167900735766
   }
 }

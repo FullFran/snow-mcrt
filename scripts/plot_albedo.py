@@ -175,7 +175,10 @@ def figure_black_carbon(data_dir: Path, out: Path) -> Path:
     )
     axes[1].set_xlim(300, 900)
     axes[1].set_xticks([300, 400, 500, 600, 700, 800, 900])
-    axes[1].set_ylim(0.85, 1.005)
+    # Wide enough to hold every series through 900 nm. Clipping the dirtiest
+    # curve would hide the one that makes the point.
+    axes[1].set_ylim(0.78, 1.005)
+    axes[1].legend(frameon=False, fontsize=8, loc="lower left")
 
     fig.tight_layout()
     fig.savefig(out, bbox_inches="tight", facecolor="white")
