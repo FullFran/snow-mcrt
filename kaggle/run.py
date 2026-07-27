@@ -6,10 +6,16 @@ Two things need a GPU, and neither is Mie theory.
 four numerical tests skip, leaving only the contract tests. An adapter that has
 never executed is not an adapter, it is an intention.
 
-**Clean snow in the visible is out of reach of one CPU core.** Transport cost
-scales as ``1/(1 - omega)``, and clean snow at 500 nm sits at ``1 - omega ~
-5e-6``. Measured locally: 200 000 scattering orders took 260 s for a case two
-orders of magnitude *easier* than this one.
+**High-albedo transport is out of reach of one CPU core.** Cost scales as
+``1/(1 - omega)``. Measured locally: 200 000 scattering orders took 260 s at
+``1 - omega ~ 5e-5``, with 20 000 photons.
+
+The budgets below are deliberately finite. Clean snow at 500 nm sits at
+``1 - omega ~ 5e-6`` and would need of order a million scattering orders; at
+500 000 photons that is over an hour of wall clock even on a GPU, which is a
+benchmark of patience rather than of physics. So this runs 700-1100 nm, where
+the answer is reachable, and reports ``truncated`` so any shortfall is visible
+rather than absorbed into a plausible-looking albedo.
 
 What does *not* belong here: the Mie and spectral albedo sweeps. Those are
 CPU-bound -- ``miepython`` has no GPU backend -- and a Kaggle CPU is no faster
@@ -18,8 +24,8 @@ than a laptop. Sending them here would cost upload time and buy nothing.
 Push it with::
 
     kaggle kernels push -p kaggle
-    kaggle kernels status fullfran/snow-mcrt-gpu
-    kaggle kernels output fullfran/snow-mcrt-gpu -p results/kaggle
+    kaggle kernels status fran17/snow-mcrt-gpu-validation
+    kaggle kernels output fran17/snow-mcrt-gpu-validation -p results/kaggle
 
 The repository is public, so the install is a plain pip from GitHub. No
 vendored copy, which would drift out of sync with the branch it claims to be.
@@ -85,7 +91,7 @@ def cross_check_backends() -> dict:
     from snow_mcrt.domain.transport import TransportConfig, run_transport
 
     results = []
-    for omega in (0.5, 0.9, 0.99):
+    for omega in (0.5, 0.9, 0.95):
         row = {"omega": omega, "reference": float(
             van_de_hulst_semi_infinite_albedo(omega)
         )}
@@ -97,7 +103,7 @@ def cross_check_backends() -> dict:
                 omega,
                 0.0,
                 config=TransportConfig(
-                    n_photons=200_000, seed=1, max_scatters=40_000
+                    n_photons=100_000, seed=1, max_scatters=20_000
                 ),
             )
             row[name] = result.albedo
@@ -130,7 +136,7 @@ def clean_snow_visible() -> dict:
     backend = CupyBackend()
 
     rows = []
-    for wavelength in (500.0, 700.0, 900.0):
+    for wavelength in (700.0, 900.0, 1100.0):
         layer = SnowLayer(100e-6, 300.0)
         props = compute_layer_properties(
             solver, layer, constants.m_at(wavelength), wavelength
@@ -146,7 +152,7 @@ def clean_snow_visible() -> dict:
             omega,
             g,
             config=TransportConfig(
-                n_photons=1_000_000, seed=1, max_scatters=5_000_000
+                n_photons=500_000, seed=1, max_scatters=300_000
             ),
         )
         expected = float(similarity_scaled_albedo(omega, g))

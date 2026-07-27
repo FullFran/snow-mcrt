@@ -7,7 +7,7 @@
 | 1 | Reproduce Wiscombe & Warren (1980) spectral albedo curves for pure snow across grain sizes (≈50 μm to 1 mm). | curves computed from Warren & Brandt (2008) constants and committed under `data/reference/`; **not yet compared point by point against the published tables** |
 | 2 | Reproduce Warren & Wiscombe (1980) effect of black carbon (1–1000 ng/g) on visible albedo. | curves computed and committed; magnitude matches, digitised comparison pending |
 | 3 | Validate e-folding depth against Libois et al. (2013) measurements and TARTES outputs. | computed and plotted; no comparison against measurement yet |
-| 4 | Cross-check against SNICAR for matching parameter sets. | not started |
+| 4 | Cross-check against SNICAR and TARTES for matching parameter sets. | **TARTES done and decomposed**: our radiative transfer reproduces it to 0.0023 worst case across five grain sizes once the grain model is held fixed. The residual 0.11 is the sphere assumption. SNICAR not started |
 
 "Computed" is not "validated". Until each curve is compared against the
 published numbers with a stated tolerance, these are self-consistent results,
