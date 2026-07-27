@@ -5,9 +5,14 @@ engine would have to become. Written before any of it is built, so the
 constraints are on the record rather than discovered halfway through.
 
 **Status:** exploratory. No code exists for any of this. Every number below is
-produced by the v1 engine or by diffusion theory, and the ones that depend on
-ice optical constants use order-of-magnitude placeholders until the real
-dataset lands — see *Caveats*.
+produced by the v1 engine or by diffusion theory.
+
+**Updated with the real dataset.** An earlier version of this note used
+order-of-magnitude placeholders for the ice absorption. Warren & Brandt (2008)
+is now in `data/ice/`, and every depth has been recomputed against it. The
+placeholders were wrong in both directions — 9x too optimistic at 450 nm, 3x
+too pessimistic at 500 nm — so the numbers below supersede them. The
+conclusions did not change; the magnitudes did.
 
 ## The question
 
@@ -59,27 +64,39 @@ Ice is extraordinarily transparent in the blue. Its absorption minimum sits
 near 390–400 nm, which is why deep glacial ice looks blue. Against pure ice
 absorption alone, penetration is generous:
 
-| grain  | `k` (ice)      | e-folding depth | depth at 1% two-way signal |
-| ------ | -------------- | --------------- | -------------------------- |
-| 100 um | 1e-11 (blue)   | 47.3 cm         | 109 cm                     |
-| 100 um | 2e-9 (500 nm)  | 3.3 cm          | 7.7 cm                     |
-| 1 mm   | 1e-11 (blue)   | 150.9 cm        | 348 cm                     |
+At 400 nm, where Warren & Brandt report the deepest genuinely *measured*
+minimum, `k = 2.365e-11`:
 
-Metres, in coarse snow, in the blue. Encouraging — and misleading.
+| grain  | e-folding depth | depth at 1% two-way signal |
+| ------ | --------------- | -------------------------- |
+| 100 um | 36.0 cm         | 82.8 cm                    |
+| 1 mm   | 114.0 cm        | 262.6 cm                   |
+
+Better than a metre in coarse snow. Encouraging — and misleading.
+
+(Below 390 nm the tabulated `k` flattens onto a reported *upper limit* of
+2.0e-11 rather than a measurement, so anything computed there is a bound. 400 nm
+is the shortest wavelength with a real number behind it.)
 
 Because ice is *so* weakly absorbing there, trace impurities take over
 completely:
 
+100 um grains at 400 nm, 300 kg/m³:
+
 | black carbon | `1 - omega` | e-folding depth | depth at 1% two-way signal |
 | ------------ | ----------- | --------------- | -------------------------- |
-| 0 ng/g       | 2.4e-08     | 47.3 cm         | 109 cm                     |
-| 0.1 ng/g     | 7.5e-08     | 26.8 cm         | 62 cm                      |
-| **1 ng/g**   | 5.3e-07     | **10.0 cm**     | **23 cm**                  |
-| 5 ng/g       | 2.6e-06     | 4.6 cm          | 10 cm                      |
-| 20 ng/g      | 1.0e-05     | 2.3 cm          | 5 cm                       |
+| 0 ng/g       | 9.3e-08     | 36.0 cm         | 82.8 cm                    |
+| 0.1 ng/g     | 1.8e-07     | 25.8 cm         | 59.4 cm                    |
+| **1 ng/g**   | 9.7e-07     | **11.1 cm**     | **25.6 cm**                |
+| 5 ng/g       | 4.5e-06     | 5.2 cm          | 11.9 cm                    |
+| 20 ng/g      | 1.8e-05     | 2.6 cm          | 6.0 cm                     |
+| 100 ng/g     | 8.8e-05     | 1.2 cm          | 2.7 cm                     |
 
-**One nanogram per gram of black carbon cuts the useful depth from 47 cm to
-10 cm.** One part per billion.
+**One nanogram per gram of black carbon cuts the useful depth from 36 cm to
+11 cm.** One part per billion.
+
+Coarse grains help but do not rescue it: 1 mm grains go from 114 cm clean to
+35 cm at 1 ng/g.
 
 And 1 ng/g is cleaner than almost anywhere on Earth. Remote Antarctic snow is
 of order 0.1–0.3 ng/g; Arctic snow runs 5–50; mid-latitude mountain snow 10–100
@@ -275,10 +292,11 @@ and nobody has to be rescued for the result to matter.
 
 ## Caveats
 
-- Ice `k` values here are order-of-magnitude placeholders. The real Warren &
-  Brandt (2008) dataset is not yet in `data/`, and the blue-minimum figure in
-  particular drives the headline numbers. **Every depth in this document should
-  be recomputed once it lands.**
+- Ice constants are now the real Warren & Brandt (2008) compilation, and every
+  depth here was recomputed against it. Below 390 nm their `k` is a reported
+  upper limit rather than a measurement, so this note quotes 400 nm.
+- Grain sizes are log-normal with `sigma_g = 1.5`. A monodisperse calculation
+  would put resonance spikes in these numbers; see the README.
 - Impurity concentrations by region are quoted from memory and need proper
   citation before they appear in anything external.
 - Diffusion-theory numbers assume a homogeneous semi-infinite pack. Real

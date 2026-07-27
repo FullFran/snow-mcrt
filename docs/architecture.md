@@ -161,6 +161,62 @@ construction, so a bad grid fails at the boundary instead of downstream.
 `test_a_uniform_grid_silently_destroys_the_phase_function` pins it. If that
 test ever stops raising, the guard has stopped working.
 
+## Monodisperse spheres are an actively misleading idealisation
+
+Found by looking at a figure, not by a test — which is the argument for
+plotting results rather than only asserting them.
+
+The first spectral albedo curve computed from the real Warren & Brandt
+constants had a single-point notch at 676.7 nm. The co-albedo jumped from
+3.0e-5 to 2.0e-4 and back, in a quantity that should vary smoothly.
+
+It is not a bug. It is a **morphology-dependent resonance** — a
+whispering-gallery mode of a perfect sphere. Resolved at fixed refractive
+index, the peak sits 13.4 times above the local background over a feature only
+`0.48` wide in `x`, at `x ~ 928`. Real physics, for one perfect sphere.
+
+And pure fiction for a snowpack. Averaging over grain size destroys it:
+
+| `sigma_g` | co-albedo at 676.7 nm |
+| --------- | --------------------- |
+| 1.0 (monodisperse) | 2.04e-04     |
+| 1.05 (a 5% spread) | 3.27e-05     |
+| 1.5 (real snow)    | 4.80e-05     |
+
+A five percent spread — far narrower than any real snow — already restores the
+smooth background. So `SnowLayer` defaults to `sigma_g = 1.5`, and reaching
+monodisperse behaviour requires passing `1.0` deliberately. Defaults should be
+the safe choice, not the simple one.
+
+Two consequences worth stating:
+
+- Number density is fixed by mass, so it is `<r³>` that enters, not the median
+  cubed. For a log-normal they differ by `exp(4.5 ln²sigma)` — a factor of 2.1
+  at `sigma_g = 1.5`. Using the median would overcount grains and inflate
+  extinction by that factor.
+- The quadrature is **another axis of the array**, integrated in one solver
+  call rather than a loop over radii. The first implementation looped, and the
+  reference sweep went from seconds to tens of minutes. The same discipline
+  that makes photons an array axis applies here.
+
+The quadrature spans ±3 standard deviations, not ±4. The tail beyond carries a
+thousandth of the grains and costs more than everything else combined: at
+`sigma_g = 1.5` the fourth deviation reaches five times the median radius,
+which for millimetre grains in the near ultraviolet means `x > 1e5`.
+
+## A limitation this does not fix
+
+The committed reference curves use 160 logarithmically spaced wavelengths, and
+that grid **does not resolve the sharp ice absorption edges**. Across 1390 to
+1447 nm the albedo of 100 um snow falls 0.386 → 0.282 → 0.137 → 0.073 in four
+points. The curve there is under-resolved, and a spike detector fires on it.
+
+That is a resolution limit, not a spurious feature, and it is distinguishable
+from one: the 676.7 nm resonance had an isolated-spike score of ~60 against a
+background of ~15, and after size averaging it reads 13.9 — indistinguishable
+from ordinary curvature. The 1400 nm edge scores 71 because it is genuinely
+that steep. Raising the point count is the fix if those bands ever matter.
+
 ## The analytic oracle
 
 `domain/analytic.py` is the independent calculation the Monte Carlo will be
