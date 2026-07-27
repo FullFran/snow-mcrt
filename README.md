@@ -269,27 +269,6 @@ that. Where it does stand up — detectability-limit theory, very clean polar
 snow, and **voids rather than absorbers**, since a cavity perturbs diffusion far
 more strongly than an absorber of the same size — is set out in the note.
 
-## The GPU, measured
-
-The CuPy adapter has now run on real hardware — a Tesla P100 — and the results
-are committed under [`results/kaggle/`](results/kaggle/).
-
-| `omega` | NumPy | CuPy | speedup |
-| ------- | ----- | ---- | ------- |
-| 0.50 | 0.33 s | 4.43 s | **0.07x** |
-| 0.90 | 1.24 s | 0.19 s | 6.5x |
-| 0.95 | 2.74 s | 0.37 s | 7.4x |
-
-The first row is not a typo. At `omega = 0.5` transport finishes in about two
-dozen scattering orders and kernel launch overhead dominates completely, making
-the GPU thirteen times *slower*. It pays in deep transport and nowhere else,
-which is exactly what the architecture notes argued from the other direction.
-
-Deep transport at 500 000 photons agrees with the analytic solution to 0.02%,
-0.08% and 0.14% at 700, 900 and 1100 nm, with zero truncated weight. And the
-`1/(1 - omega)` cost law is now measured rather than asserted: a factor of 37
-in co-albedo buys 33 times the scattering orders and 32 times the wall clock.
-
 ## Known gaps
 
 - The four benchmark notebook reproductions are not written yet.
