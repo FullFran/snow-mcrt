@@ -15,7 +15,7 @@ from snow_mcrt.domain.medium import (
     SnowLayer,
     compute_layer_properties,
 )
-from snow_mcrt.domain.mie import compute_mie_properties
+from snow_mcrt.domain.mie import LogNormalGrainSizes, compute_mie_properties
 
 ICE_M_VISIBLE = 1.3105 + 2.0e-9j
 ICE_M_NEAR_IR = 1.2985 + 1.3e-5j
@@ -78,7 +78,10 @@ class TestPureSnow:
     def test_a_layer_with_no_impurities_is_just_its_grains(self, solver):
         # The mixture machinery must be an identity when there is nothing to
         # mix, or every impurity result is offset by an unknown constant.
-        layer = with_black_carbon(0.0)
+        # Monodisperse on purpose: this compares against a single-radius Mie
+        # call, so the size distribution has to be switched off to make the
+        # two comparable.
+        layer = with_black_carbon(0.0, grain_sigma_g=1.0)
         props = compute_layer_properties(solver, layer, ICE_M_VISIBLE, 500.0)
         grains = compute_mie_properties(solver, ICE_M_VISIBLE, 100e-6, 500.0)
         assert props.single_scattering_albedo[0] == pytest.approx(
@@ -260,3 +263,74 @@ class TestValidation:
 
     def test_a_semi_infinite_layer_is_the_default(self):
         assert math.isinf(SnowLayer(100e-6, 300.0).thickness_m)
+
+
+class TestGrainSizeDistribution:
+    """Monodisperse spheres are an actively misleading idealisation.
+
+    A perfect sphere supports morphology-dependent resonances -- whispering
+    gallery modes -- that spike absorption by more than tenfold at isolated
+    size parameters. They are real physics for one sphere and pure fiction for
+    a snowpack, and they show up in a spectral albedo curve as spikes no real
+    snow exhibits. Averaging over a size distribution is the fix, and it is
+    why the default is 1.5 rather than 1.
+    """
+
+    RESONANT_WAVELENGTH_NM = 676.692468
+    RESONANT_M = 1.30739922596 + 2.023849359999999e-08j
+
+    def co_albedo(self, solver, sigma_g: float) -> float:
+        layer = SnowLayer(100e-6, 300.0, grain_sigma_g=sigma_g)
+        props = compute_layer_properties(
+            solver, layer, self.RESONANT_M, self.RESONANT_WAVELENGTH_NM
+        )
+        return float(1.0 - props.single_scattering_albedo[0])
+
+    def test_a_monodisperse_pack_shows_the_resonance(self, solver):
+        # Pins the defect the default exists to avoid. Measured against the
+        # smooth background of ~4e-5, this point sits five times higher.
+        assert self.co_albedo(solver, 1.0) > 1.5e-4
+
+    def test_a_realistic_distribution_removes_it(self, solver):
+        assert self.co_albedo(solver, 1.5) < 7e-5
+
+    def test_even_a_five_percent_spread_removes_it(self, solver):
+        # Real snow is nowhere near this narrow. If a 5% spread already
+        # suffices, no physical snowpack can display these features.
+        assert self.co_albedo(solver, 1.05) < 7e-5
+
+    def test_the_default_is_polydisperse(self):
+        assert SnowLayer(100e-6, 300.0).grain_sigma_g == 1.5
+
+    def test_a_monodisperse_distribution_is_a_single_radius(self):
+        radii, weights = LogNormalGrainSizes(100e-6, sigma_g=1.0).radii_and_weights()
+        assert radii.size == 1
+        assert radii[0] == pytest.approx(100e-6)
+        assert weights[0] == pytest.approx(1.0)
+
+    def test_weights_are_normalised(self):
+        _, weights = LogNormalGrainSizes(100e-6, sigma_g=1.6).radii_and_weights()
+        assert weights.sum() == pytest.approx(1.0)
+
+    def test_mean_cube_radius_matches_the_lognormal_moment(self, solver):
+        # Number density is fixed by mass, so <r^3> is what enters, not the
+        # median cubed. For a log-normal those differ by exp(4.5 ln^2 sigma) --
+        # a factor of 2.1 at sigma_g = 1.5. Using the median would overcount
+        # grains and inflate extinction by the same factor.
+        sizes = LogNormalGrainSizes(100e-6, sigma_g=1.5)
+        expected = (100e-6) ** 3 * np.exp(4.5 * np.log(1.5) ** 2)
+        assert sizes.mean_cube_radius == pytest.approx(expected, rel=1e-3)
+        assert sizes.mean_cube_radius > 2 * (100e-6) ** 3
+
+    def test_broader_distributions_change_extinction(self, solver):
+        narrow = compute_layer_properties(
+            solver, SnowLayer(100e-6, 300.0, grain_sigma_g=1.0), ICE_M_VISIBLE, 500.0
+        )
+        broad = compute_layer_properties(
+            solver, SnowLayer(100e-6, 300.0, grain_sigma_g=1.5), ICE_M_VISIBLE, 500.0
+        )
+        assert broad.extinction_coefficient[0] != narrow.extinction_coefficient[0]
+
+    def test_rejects_a_distribution_narrower_than_a_point(self):
+        with pytest.raises(ValueError, match="must be >= 1"):
+            SnowLayer(100e-6, 300.0, grain_sigma_g=0.9)

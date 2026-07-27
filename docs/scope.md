@@ -2,10 +2,16 @@
 
 ## Research questions for v1
 
-1. Reproduce Wiscombe & Warren (1980) spectral albedo curves for pure snow across grain sizes (≈50 μm to 1 mm).
-2. Reproduce Warren & Wiscombe (1980) effect of black carbon (1–1000 ng/g) on visible albedo.
-3. Validate e-folding depth against Libois et al. (2013) measurements and TARTES outputs.
-4. Cross-check against SNICAR for matching parameter sets.
+| # | question | status |
+| - | -------- | ------ |
+| 1 | Reproduce Wiscombe & Warren (1980) spectral albedo curves for pure snow across grain sizes (≈50 μm to 1 mm). | curves computed from Warren & Brandt (2008) constants and committed under `data/reference/`; **not yet compared point by point against the published tables** |
+| 2 | Reproduce Warren & Wiscombe (1980) effect of black carbon (1–1000 ng/g) on visible albedo. | curves computed and committed; magnitude matches, digitised comparison pending |
+| 3 | Validate e-folding depth against Libois et al. (2013) measurements and TARTES outputs. | computed and plotted; no comparison against measurement yet |
+| 4 | Cross-check against SNICAR for matching parameter sets. | not started |
+
+"Computed" is not "validated". Until each curve is compared against the
+published numbers with a stated tolerance, these are self-consistent results,
+not reproductions.
 
 ## Deliverables
 
