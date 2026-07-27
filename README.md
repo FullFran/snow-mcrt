@@ -2,7 +2,8 @@
 
 Monte Carlo Ray Tracing for light propagation in snow.
 
-**Status:** early stage — scope and bibliography only. Engine not yet started.
+**Status:** early stage. Single-scattering layer implemented and validated
+against the Rayleigh and geometric limits. Photon transport not yet started.
 
 ## Goal
 
@@ -20,19 +21,37 @@ Reproduce canonical results from the snow-optics literature (spectral albedo cur
 
 Non-spherical grain morphology, coherent effects, polarization, 3-D topography, snow metamorphism, coupled atmospheric radiative transfer.
 
-## Planned layout
+## Layout
 
 ```
 snow-mcrt/
 ├── docs/
-│   ├── bib/
-│   │   └── references.md
-│   └── scope.md
-├── python/           # MC engine (core + FastAPI service)
-├── notebooks/        # One notebook per benchmark reproduction
-├── data/             # Ice optical constants, published benchmarks
+│   ├── architecture.md   # why the layers are separated
+│   ├── scope.md
+│   └── bib/references.md
+├── src/snow_mcrt/
+│   ├── domain/           # physics; imports no array library
+│   ├── ports/            # backend, Mie solver, optical data protocols
+│   ├── adapters/         # NumPy (oracle) + CuPy; miepython; tabulated data
+│   ├── application/      # one use case per research question
+│   └── infra/            # CSV + manifest writers
+├── notebooks/            # one per benchmark reproduction
+├── data/reference/       # committed results, so figures reproduce without a GPU
 └── tests/
 ```
+
+Rationale for the layering, the two conventions that are silent when wrong,
+and where the GPU actually pays: [`docs/architecture.md`](docs/architecture.md).
+
+## Getting started
+
+```bash
+uv venv && uv pip install -e '.[dev]'
+pytest
+```
+
+CuPy is optional (`pip install -e '.[gpu]'`). Without it, the GPU tests skip
+and everything else runs.
 
 ## References
 

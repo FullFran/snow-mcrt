@@ -19,7 +19,13 @@
 - Non-spherical grain morphology (geometric optics for large grains, IRR for columnar ice).
 - Snow metamorphism / microstructure evolution.
 - Coupled atmospheric radiative transfer.
-- GPU acceleration — profile first, decide later.
+
+GPU acceleration has moved *into* scope for v1. The array-backend port is in
+place from the start with both NumPy and CuPy adapters, because the port is
+what keeps `domain/` free of any array-library import and what makes the NumPy
+oracle possible — it is a correctness device before it is a performance one.
+The GPU is expected to pay only in the photon-transport loop; Mie evaluation
+over a wavelength grid stays on the host. See `docs/architecture.md`.
 
 ## Success criteria
 
