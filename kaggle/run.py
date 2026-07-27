@@ -21,16 +21,13 @@ Push it with::
     kaggle kernels status fullfran/snow-mcrt-gpu
     kaggle kernels output fullfran/snow-mcrt-gpu -p results/kaggle
 
-**Private repository.** ``pip install git+https://...`` cannot reach a private
-repo anonymously. Either add a GitHub token as the Kaggle secret
-``GITHUB_TOKEN``, or attach the source as a private Kaggle dataset and set
-``SOURCE_DATASET`` below. The token path is handled automatically.
+The repository is public, so the install is a plain pip from GitHub. No
+vendored copy, which would drift out of sync with the branch it claims to be.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import time
@@ -39,32 +36,25 @@ from pathlib import Path
 REPO = "github.com/FullFran/snow-mcrt.git"
 BRANCH = "main"
 OUTPUT = Path("/kaggle/working")
-SOURCE_DATASET = Path("/kaggle/input/snow-mcrt-source")
+CONSTANTS = OUTPUT / "warren_brandt_2008.dat"
 
 
 def install() -> None:
-    """Install the package, handling the private-repository case."""
-    token = os.environ.get("GITHUB_TOKEN")
-    if token is None:
-        try:
-            from kaggle_secrets import UserSecretsClient
-
-            token = UserSecretsClient().get_secret("GITHUB_TOKEN")
-        except Exception:
-            token = None
-
-    if token:
-        target = f"git+https://{token}@{REPO}@{BRANCH}"
-    elif SOURCE_DATASET.exists():
-        target = str(SOURCE_DATASET)
-    else:
-        raise SystemExit(
-            "snow-mcrt is a private repository. Add a GitHub token as the "
-            "Kaggle secret GITHUB_TOKEN, or attach the source as a dataset "
-            f"at {SOURCE_DATASET}."
-        )
+    """Install the package and fetch the ice constants it needs."""
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-q", target], check=True
+        [sys.executable, "-m", "pip", "install", "-q", f"git+https://{REPO}@{BRANCH}"],
+        check=True,
+    )
+    # pip installs the package, not the repository data directory, so the
+    # optical constants are fetched separately rather than vendored into the
+    # wheel where they would be invisible to anyone auditing provenance.
+    subprocess.run(
+        [
+            "curl", "-sSL", "-o", str(CONSTANTS),
+            f"https://raw.githubusercontent.com/FullFran/snow-mcrt/{BRANCH}"
+            "/data/ice/warren_brandt_2008.dat",
+        ],
+        check=True,
     )
 
 
@@ -176,16 +166,10 @@ def clean_snow_visible() -> dict:
 
 
 def _constants_path() -> str:
-    """Locate the packaged optical constants, wherever pip put them."""
-    import snow_mcrt
-
-    root = Path(snow_mcrt.__file__).resolve().parent.parent.parent
-    candidate = root / "data" / "ice" / "warren_brandt_2008.dat"
-    if candidate.exists():
-        return str(candidate)
-    if SOURCE_DATASET.exists():
-        return str(SOURCE_DATASET / "data" / "ice" / "warren_brandt_2008.dat")
-    raise FileNotFoundError("ice optical constants not found in the install")
+    """The ice constants fetched alongside the install."""
+    if not CONSTANTS.exists():
+        raise FileNotFoundError(f"ice optical constants not found at {CONSTANTS}")
+    return str(CONSTANTS)
 
 
 def main() -> int:
