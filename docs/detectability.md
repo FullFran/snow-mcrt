@@ -4,8 +4,14 @@ Where this project could go after v1, what the physics allows, and what the
 engine would have to become. Written before any of it is built, so the
 constraints are on the record rather than discovered halfway through.
 
-**Status:** exploratory. No code exists for any of this. Every number below is
-produced by the v1 engine or by diffusion theory.
+**Status:** exploratory, and now partly built. The diffusion theory this note
+rests on is implemented and tested in `snow_mcrt.domain.diffusion` — fluence,
+diffuse reflectance, the sensitivity kernel, the extrapolated boundary — so
+every figure and every number below is produced by code under test rather than
+by arithmetic in a margin.
+
+What does *not* exist: three-dimensional transport, ray-object intersection,
+detectors, or any object in any snowpack. Those are scoped at the end.
 
 **Updated with the real dataset.** An earlier version of this note used
 order-of-magnitude placeholders for the ice absorption. Warren & Brandt (2008)
