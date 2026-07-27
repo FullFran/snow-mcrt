@@ -128,6 +128,80 @@ radius; and it climbs three orders of magnitude from the visible to 1300 nm.
 That last row is the grain-size signal the near-infrared benchmarks exist to
 measure, and it is why visible albedo is set by trace absorbers instead.
 
+## The forward-peak trap
+
+A tabulated Mie phase function for snow-sized grains cannot use a uniformly
+spaced `mu` grid. This is not a refinement question, it is a correctness one,
+and it is worth stating plainly because the failure is loud once measured and
+completely silent in use.
+
+A sphere of size parameter `x` concentrates most of its scattered energy into a
+diffraction peak of angular width around `1/x`. A 100 um grain in the visible
+is `x ~ 1.3e3`, so the peak spans microradians. In `mu` it is narrower still,
+because `1 - mu ~ theta² / 2` puts it within `1e-7` of unity.
+
+A uniform grid of 20 001 points steps straight over it. Measured:
+
+| grid                       | `integral p dmu` | `<cos>` | `g` from the series |
+| -------------------------- | ---------------- | ------- | ------------------- |
+| uniform, 20 001 points     | 20.41            | 20.30   | 0.8892              |
+| log-spaced angle, `n=4000` | 1.006            | 0.8925  | 0.8892              |
+
+The uniform grid produces a "phase function" that integrates to twenty and has
+a mean cosine above one — not a physical quantity at all. Nothing raises at the
+point of use. A transport run would simply return wrong albedos.
+
+`forward_peaked_mu_grid` spaces angles logarithmically from `1e-7` rad to `pi`.
+That lower bound is a hard float64 floor rather than a tuning choice: below it,
+`1 - cos(theta)` falls under the representable spacing at unity and
+neighbouring angles collapse onto the same cosine. Collapsed points are
+dropped. `TabulatedPhaseFunction` then validates normalisation on
+construction, so a bad grid fails at the boundary instead of downstream.
+
+`test_a_uniform_grid_silently_destroys_the_phase_function` pins it. If that
+test ever stops raising, the guard has stopped working.
+
+## The analytic oracle
+
+`domain/analytic.py` is the independent calculation the Monte Carlo will be
+checked against. It is domain knowledge rather than test scaffolding: research
+question 3 compares e-folding depth against measurement, and these are the
+closed forms that produce it.
+
+Deep clean snow sits in the asymptotic regime — semi-infinite, homogeneous,
+diffuse illumination — which is exactly where two-stream theory is reliable and
+where a transport bug has nowhere to hide:
+
+- `similarity_parameter` — `s = sqrt((1-omega)/(1-omega*g))`. Two snowpacks
+  with different `omega` and `g` but equal `s` are optically
+  indistinguishable at depth. This is why grain shape can be folded into an
+  effective radius, and why v1 gets away with spheres.
+- `semi_infinite_albedo` — `(1-s)/(1+s)`, delta-Eddington scaled by default.
+- `e_folding_depth` — from `k_e = beta sqrt(3(1-omega)(1-omega*g))`.
+
+Produced by the current code, at 300 kg/m³:
+
+| case                  | albedo | e-folding depth |
+| --------------------- | ------ | --------------- |
+| clean 50 um, 500 nm   | 0.9913 | 2.53 cm         |
+| clean 100 um, 500 nm  | 0.9875 | 3.52 cm         |
+| clean 1 mm, 500 nm    | 0.9612 | 11.23 cm        |
+| clean 50 um, 1300 nm  | 0.6431 | 0.05 cm         |
+| clean 100 um, 1300 nm | 0.5365 | 0.07 cm         |
+| clean 1 mm, 1300 nm   | 0.1560 | 0.23 cm         |
+
+Two things to read off it. Visible albedo moves by 3 points across a twentyfold
+change in grain radius; near-infrared albedo moves by 49. That ratio is why the
+two bands answer different questions — near-infrared is the grain-size
+diagnostic, visible is the impurity one. And light penetrates centimetres in
+the visible while stopping within a millimetre at 1300 nm, which is the same
+fact seen from the other side.
+
+Note also how far the e-folding depth exceeds a single mean free path: 3.5 cm
+against 0.2 mm, a factor of 175. Photons scatter thousands of times before
+being absorbed. Any transport implementation that terminates them too eagerly
+will fail this comparison badly, which is the point.
+
 ## Testing strategy
 
 Tests are organised by what they compare against, not by which module they
@@ -139,6 +213,15 @@ touch:
   different material. `m_at` raises instead.
 - `test_mie.py` — ground truth: the Rayleigh and geometric limits, energy
   conservation, the sign convention, and the snow regime.
+- `test_phase.py` — normalisation and sampling. The Henyey-Greenstein sampler
+  is checked against its own closed-form CDF in units of Poisson error, since
+  the sparsest bin's one-sigma spread is already 1.4% and a flat relative
+  tolerance would be either failing or vacuous depending on the bin. The Mie
+  table's mean cosine is cross-checked against the `g` from the series — two
+  entirely different code paths through the same solver.
+- `test_analytic.py` — limits the oracle must satisfy (a conservative medium
+  reflects everything; a purely absorbing one reflects nothing) and values a
+  snow-optics reader recognises.
 - `test_backends.py` — the port contract, checked against both adapters. The
   CuPy *numerical* tests skip without CUDA; the *contract* tests, including
   that `CupyBackend` refuses to construct when CuPy is absent, run everywhere.
