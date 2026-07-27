@@ -1,0 +1,68 @@
+{
+  "environment": {
+    "gpu": "Tesla P100-PCIE-16GB",
+    "cupy": "14.0.1",
+    "total_memory_gb": 15.89
+  },
+  "backend_cross_check": [
+    {
+      "omega": 0.5,
+      "reference": 0.14453194209500125,
+      "numpy": 0.1469360609436035,
+      "numpy_seconds": 0.33,
+      "cupy": 0.146204988489151,
+      "cupy_seconds": 4.43,
+      "relative_difference": 0.0049754461209702665
+    },
+    {
+      "omega": 0.9,
+      "reference": 0.47717008968542757,
+      "numpy": 0.47881041949151887,
+      "numpy_seconds": 1.24,
+      "cupy": 0.4785553218541109,
+      "cupy_seconds": 0.19,
+      "relative_difference": 0.0005327737806517392
+    },
+    {
+      "omega": 0.95,
+      "reference": 0.5962666136936569,
+      "numpy": 0.5975062594887377,
+      "numpy_seconds": 2.74,
+      "cupy": 0.597408267385747,
+      "cupy_seconds": 0.37,
+      "relative_difference": 0.00016400180154515985
+    }
+  ],
+  "clean_snow_visible": [
+    {
+      "wavelength_nm": 700.0,
+      "co_albedo": 6.530601433984984e-05,
+      "monte_carlo": 0.9451672454353656,
+      "analytic": 0.9449671583201036,
+      "relative_difference": 0.00021173975571561973,
+      "truncated": 0.0,
+      "scatters": 50548,
+      "seconds": 83.8
+    },
+    {
+      "wavelength_nm": 900.0,
+      "co_albedo": 0.0007324800927885899,
+      "monte_carlo": 0.8280823218545162,
+      "analytic": 0.8274577948261879,
+      "relative_difference": 0.0007547539369782194,
+      "truncated": 0.0,
+      "scatters": 5118,
+      "seconds": 8.4
+    },
+    {
+      "wavelength_nm": 1100.0,
+      "co_albedo": 0.0024257174481481236,
+      "monte_carlo": 0.7104603445208391,
+      "analytic": 0.7094715674999135,
+      "relative_difference": 0.001393680967949024,
+      "truncated": 0.0,
+      "scatters": 1543,
+      "seconds": 2.6
+    }
+  ]
+}
