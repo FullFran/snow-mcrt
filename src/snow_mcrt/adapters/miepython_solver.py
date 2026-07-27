@@ -36,17 +36,21 @@ class MiepythonSolver:
         if np.any(x_arr < 0):
             raise ValueError("size parameter must be non-negative")
 
-        # miepython indexes its inputs, so 0-d arrays have to be promoted to
-        # shape (1,) before they reach it.
+        # miepython indexes its inputs with a scalar loop, so it accepts only
+        # 0-d or 1-D arrays: a 0-d input raises on len(), and a 2-D one raises
+        # on an ambiguous truth value. Flatten to 1-D here and restore the
+        # caller's shape afterwards, so the domain can hand over any broadcast
+        # grid it likes -- a (radius, wavelength) quadrature, for one.
         m_arr, x_arr = np.broadcast_arrays(np.atleast_1d(m_arr), np.atleast_1d(x_arr))
+        shape = m_arr.shape
         # miepython's convention: m = n - ik.
         q_ext, q_sca, _q_back, g = miepython.efficiencies_mx(
-            np.conjugate(m_arr), x_arr
+            np.conjugate(m_arr).ravel(), x_arr.ravel()
         )
         return (
-            np.asarray(q_ext, dtype=float),
-            np.asarray(q_sca, dtype=float),
-            np.asarray(g, dtype=float),
+            np.asarray(q_ext, dtype=float).reshape(shape),
+            np.asarray(q_sca, dtype=float).reshape(shape),
+            np.asarray(g, dtype=float).reshape(shape),
         )
 
     def phase_function(

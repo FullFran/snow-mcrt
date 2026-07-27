@@ -117,6 +117,80 @@ class MieProperties:
         return (rho / grain_mass) * self.cross_section_ext
 
 
+@dataclass(frozen=True)
+class LogNormalGrainSizes:
+    """A log-normal distribution of grain radii.
+
+    Monodisperse spheres are not merely an idealisation here, they are an
+    actively misleading one. A perfect sphere supports morphology-dependent
+    resonances -- whispering-gallery modes -- that spike absorption by an order
+    of magnitude at isolated size parameters. Measured on the Warren & Brandt
+    constants at 676.7 nm with 100 um grains: the co-albedo jumps 13.4x above
+    its background over a resonance only ``0.48`` wide in ``x``.
+
+    Those spikes are real physics for one perfect sphere and pure fiction for a
+    snowpack. Real grains vary in size, and the averaging destroys the
+    resonances completely -- a geometric standard deviation of 1.05, a 5%
+    spread, already restores the smooth background. Real snow is nearer 1.5.
+
+    Args:
+        median_radius_m: Median (geometric mean) radius in metres.
+        sigma_g: Geometric standard deviation. Must be >= 1; exactly 1 is
+            monodisperse and reproduces the single-radius result, resonances
+            and all.
+        n_quadrature: Points used to integrate over the distribution.
+    """
+
+    median_radius_m: float
+    sigma_g: float = 1.5
+    n_quadrature: int = 17
+    n_sigma: float = 3.0
+
+    def __post_init__(self) -> None:
+        if self.median_radius_m <= 0:
+            raise ValueError("median radius must be positive")
+        if self.sigma_g < 1.0:
+            raise ValueError(
+                "geometric standard deviation must be >= 1; "
+                "1 means monodisperse"
+            )
+        if self.n_quadrature < 2:
+            raise ValueError("need at least two quadrature points")
+
+    def radii_and_weights(self) -> tuple[np.ndarray, np.ndarray]:
+        """Quadrature radii and their number-fraction weights.
+
+        Deterministic, so a run is reproducible from its manifest. Monte Carlo
+        sampling of the size distribution would add a second, unnecessary
+        source of noise on top of the photon transport.
+        """
+        if self.sigma_g == 1.0:
+            return np.array([self.median_radius_m]), np.array([1.0])
+        ln_sigma = np.log(self.sigma_g)
+        # Three geometric standard deviations, not four. The tail beyond it
+        # carries a thousandth of the number, but its cost is brutal: at
+        # sigma_g = 1.5 the fourth deviation reaches five times the median
+        # radius, which for millimetre grains in the near ultraviolet means a
+        # size parameter above 1e5. The Mie series there costs more than
+        # everything else in the run combined and contributes nothing that
+        # survives rounding.
+        ln_r = np.linspace(
+            np.log(self.median_radius_m) - self.n_sigma * ln_sigma,
+            np.log(self.median_radius_m) + self.n_sigma * ln_sigma,
+            self.n_quadrature,
+        )
+        weights = np.exp(
+            -0.5 * ((ln_r - np.log(self.median_radius_m)) / ln_sigma) ** 2
+        )
+        return np.exp(ln_r), weights / weights.sum()
+
+    @property
+    def mean_cube_radius(self) -> float:
+        """``<r^3>``, which is what fixes number density from bulk density."""
+        radii, weights = self.radii_and_weights()
+        return float(np.sum(weights * radii**3))
+
+
 def compute_mie_properties(
     solver: MieSolver,
     m_particle: np.ndarray | complex,

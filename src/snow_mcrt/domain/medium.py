@@ -29,7 +29,11 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from snow_mcrt.domain.mie import ICE_DENSITY, compute_mie_properties
+from snow_mcrt.domain.mie import (
+    ICE_DENSITY,
+    LogNormalGrainSizes,
+    compute_mie_properties,
+)
 from snow_mcrt.ports.mie_solver import MieSolver
 
 NG_PER_G_TO_KG_PER_KG = 1e-9
@@ -127,21 +131,31 @@ class SnowLayer:
     """A homogeneous layer of snow.
 
     Args:
-        grain_radius_m: Ice grain radius in metres.
+        grain_radius_m: Median ice grain radius in metres.
         density: Bulk snow density, kg/m^3.
         thickness_m: Layer thickness in metres. ``inf`` for a semi-infinite
             pack, which is what the analytic oracle assumes.
         impurities: Absorbing populations mixed in.
+        grain_sigma_g: Geometric standard deviation of the grain size
+            distribution. **Defaults to 1.5, not 1.** A monodisperse pack is
+            not a harmless simplification: perfect spheres support
+            morphology-dependent resonances that spike absorption more than
+            tenfold at isolated wavelengths, producing spectral features no
+            real snowpack has. Pass 1.0 only to reproduce single-sphere
+            results deliberately. See :class:`LogNormalGrainSizes`.
     """
 
     grain_radius_m: float
     density: float
     thickness_m: float = math.inf
     impurities: tuple[ImpurityLoading, ...] = field(default_factory=tuple)
+    grain_sigma_g: float = 1.5
 
     def __post_init__(self) -> None:
         if self.grain_radius_m <= 0:
             raise ValueError("grain radius must be positive")
+        if self.grain_sigma_g < 1.0:
+            raise ValueError("grain_sigma_g must be >= 1; 1 means monodisperse")
         if not 0 < self.density <= ICE_DENSITY:
             raise ValueError(
                 f"snow density must lie in (0, {ICE_DENSITY}] kg/m^3, "
@@ -151,10 +165,24 @@ class SnowLayer:
             raise ValueError("layer thickness must be positive")
 
     @property
+    def grain_sizes(self) -> LogNormalGrainSizes:
+        """The grain size distribution this layer describes."""
+        return LogNormalGrainSizes(
+            median_radius_m=self.grain_radius_m, sigma_g=self.grain_sigma_g
+        )
+
+    @property
     def grain_number_density(self) -> float:
-        """Ice grains per cubic metre."""
-        grain_mass = ICE_DENSITY * (4.0 / 3.0) * math.pi * self.grain_radius_m**3
-        return self.density / grain_mass
+        """Ice grains per cubic metre.
+
+        Fixed by mass conservation, so it is ``<r^3>`` that enters, not the
+        median cubed. For a broad distribution those differ substantially --
+        at ``sigma_g = 1.5`` by more than a factor of three.
+        """
+        mean_mass = (
+            ICE_DENSITY * (4.0 / 3.0) * math.pi * self.grain_sizes.mean_cube_radius
+        )
+        return self.density / mean_mass
 
 
 @dataclass(frozen=True)
@@ -202,14 +230,29 @@ def compute_layer_properties(
         parameter on the wavelength grid.
     """
     wavelengths = np.atleast_1d(np.asarray(wavelength_nm, dtype=float))
+    m_grid = np.atleast_1d(np.asarray(m_ice, dtype=complex))
 
-    ice = compute_mie_properties(
-        solver, m_ice, layer.grain_radius_m, wavelengths
-    )
+    # Integrate the grain population over its size distribution. Skipping this
+    # leaves single-sphere resonances in the spectrum -- see LogNormalGrainSizes.
+    #
+    # One solver call over the full (radius, wavelength) grid, not a loop over
+    # radii. The quadrature is another axis of the array, exactly as photons
+    # are in the transport loop; iterating it in Python would make the size
+    # distribution cost seventeen times a monodisperse run for no reason.
+    radii, weights = layer.grain_sizes.radii_and_weights()
     n_ice = layer.grain_number_density
-    beta_ext = n_ice * ice.cross_section_ext
-    beta_sca = n_ice * ice.cross_section_sca
-    beta_sca_g = beta_sca * ice.g
+    ice = compute_mie_properties(
+        solver,
+        m_grid[np.newaxis, :],
+        radii[:, np.newaxis],
+        wavelengths[np.newaxis, :],
+    )
+    weight_column = weights[:, np.newaxis]
+    beta_ext = n_ice * np.sum(weight_column * ice.cross_section_ext, axis=0)
+    beta_sca = n_ice * np.sum(weight_column * ice.cross_section_sca, axis=0)
+    beta_sca_g = n_ice * np.sum(
+        weight_column * ice.cross_section_sca * ice.g, axis=0
+    )
 
     for loading in layer.impurities:
         particle = loading.impurity
