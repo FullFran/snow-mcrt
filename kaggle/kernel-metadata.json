@@ -1,5 +1,5 @@
 {
-  "id": "fran17/snow-mcrt-gpu",
+  "id": "fran17/snow-mcrt-gpu-validation",
   "title": "snow-mcrt GPU validation",
   "code_file": "run.py",
   "language": "python",

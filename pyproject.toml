@@ -12,7 +12,10 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = ["cupy-cuda12x>=13.0"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "matplotlib>=3.7"]
+# TARTES is an independent published implementation used only to cross-check
+# results. The engine never imports it; its tests skip when it is absent.
+validation = ["tartes>=2.0"]
 
 [build-system]
 requires = ["hatchling"]

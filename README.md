@@ -107,6 +107,40 @@ Everything above follows from this curve. Note the shaded band: below 390 nm
 the tabulated `k` is a reported *upper limit*, not a measurement, so
 penetration depths computed there are bounds rather than predictions.
 
+## Validated against an independent implementation
+
+![Cross-validation against TARTES](docs/figures/tartes-validation.png)
+
+Two codes producing similar curves proves very little. The interesting question
+is *where* they differ, so the comparison against TARTES (Libois, Picard et
+al., 2013) is decomposed rather than reported as a single number.
+
+Both codes read the same Warren & Brandt (2008) constants — verified, not
+assumed. Then TARTES's own single-scattering parameters are fed into **our**
+radiative transfer solver. If the two then agree, they solve the transfer
+problem the same way and everything else between them is a modelling choice.
+
+| grain radius | transfer residual | grain-model residual |
+| ------------ | ----------------- | -------------------- |
+| 50 μm        | 0.00020           | 0.10087              |
+| 100 μm       | 0.00051           | 0.11388              |
+| 250 μm       | 0.00128           | 0.11475              |
+| 500 μm       | 0.00197           | 0.11454              |
+| 1000 μm      | 0.00231           | 0.11373              |
+
+**The transfer solution agrees to better than 0.003. The remaining 0.11 is
+entirely the grain model** — a factor of fifty between them.
+
+And that residual has a name. Full Mie on spheres gives `g ≈ 0.89`; TARTES uses
+`0.82`, calibrated for the non-spherical grains real snow is actually made of.
+Spheres over-predict forward scattering, photons therefore travel deeper per
+collision and accumulate more path in ice, and our albedo sits below TARTES
+everywhere the ice absorbs at all. In the blue, where absorption nearly
+vanishes, the two converge regardless.
+
+Non-spherical morphology is explicitly out of scope for v1. This measures that
+limitation rather than hiding it.
+
 ## Architecture
 
 Clean/hexagonal, and each port earns its place:
