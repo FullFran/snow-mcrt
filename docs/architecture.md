@@ -202,6 +202,99 @@ against 0.2 mm, a factor of 175. Photons scatter thousands of times before
 being absorbed. Any transport implementation that terminates them too eagerly
 will fail this comparison badly, which is the point.
 
+## Which oracle, and a correction
+
+The two-stream albedo was introduced here as "the oracle". Measuring it
+against the Monte Carlo showed that framing was wrong, and the correction is
+worth recording because it changes what the tests are allowed to assert.
+
+`semi_infinite_albedo` (two-stream) is an *approximation*, and not a tight one
+away from the conservative limit:
+
+| `omega` | Monte Carlo | van de Hulst | MC error | two-stream | two-stream error |
+| ------- | ----------- | ------------ | -------- | ---------- | ---------------- |
+| 0.50    | 0.1474      | 0.1445       | +1.96%   | 0.1716     | **+18.71%**      |
+| 0.80    | 0.3428      | 0.3403       | +0.73%   | 0.3820     | +12.23%          |
+| 0.90    | 0.4781      | 0.4772       | +0.20%   | 0.5195     | +8.87%           |
+| 0.95    | 0.5961      | 0.5963       | −0.03%   | 0.6345     | +6.41%           |
+| 0.99    | 0.7938      | 0.7945       | −0.09%   | 0.8182     | +2.98%           |
+
+The transport agrees with van de Hulst's fit to the exact H-function solution
+to a fraction of a percent in the high-albedo regime. Two-stream is off by up
+to 19%. Judging the Monte Carlo against two-stream would have meant chasing a
+"bug" that was the yardstick all along.
+
+So there are two functions and they have different jobs.
+`van_de_hulst_semi_infinite_albedo` (with `similarity_scaled_albedo` for
+anisotropic media) is the quantitative oracle. `semi_infinite_albedo` stays
+because delta-Eddington work needs it and because it is the right tool for
+reasoning, but it does not judge correctness.
+
+The albedo and e-folding figures quoted earlier in this document are
+unaffected: clean snow in the visible sits at `1 - omega ~ 4e-6`, where the
+two agree to well under a tenth of a percent.
+
+## What actually constrains the transport
+
+Ordered by strength.
+
+**Exact invariants** hold for any parameters and admit no tuning:
+
+- A conservative slab returns every photon: `R + T = 1` to 1e-12, with zero
+  absorbed and zero truncated.
+- Without Russian roulette the energy ledger closes to float64 epsilon,
+  because nothing is ever discarded.
+- A purely absorbing medium reflects exactly nothing.
+
+**Roulette conserves energy only in expectation.** Killed photons take their
+weight with them; survivors are boosted by `1/p`. Measured residuals are
+`−1.4e-6` and `+1.9e-6` — small, and *sign-changing between runs*, which is
+the signature of an unbiased estimator rather than a leak. With roulette off,
+the same runs close to `1e-16`. The test suite asserts both separately;
+demanding exactness with roulette on would be demanding that an estimator be a
+conserved quantity.
+
+**Similarity scaling** cross-checks the angular sampling: a run with
+`(omega, g)` must land on the same albedo as one with the equivalent isotropic
+`omega* = omega(1-g)/(1-omega g)`. Measured agreement is 0.4–0.6%, which is
+the accuracy of similarity theory itself. If the deflection rotation were
+wrong, forward scattering would not map onto its isotropic equivalent at all.
+
+**Truncation is reported, never absorbed.** `TransportResult.truncated` carries
+weight still in flight when `max_scatters` runs out. Folding it into
+absorption would turn a convergence failure into a plausible albedo with no
+indication anything went wrong. A test starves a run to five scattering orders
+and asserts the shortfall surfaces there.
+
+## Why the GPU is not optional after all
+
+The cost of this problem is physics, not implementation. Light really does
+scatter tens of thousands of times inside snow before it leaves, and the mean
+number of scattering orders scales as `1/(1-omega)`.
+
+End-to-end runs, 20 000 photons on one CPU core, full pipeline from refractive
+index through Mie and mixing to transport:
+
+| case                    | `1 − omega` | MC albedo | oracle | scatters | time  |
+| ----------------------- | ----------- | --------- | ------ | -------- | ----- |
+| 1 mm, 1300 nm, clean    | 9.3e-02     | 0.1288    | 0.1308 | 189      | 0.3 s |
+| 100 um, 1300 nm, clean  | 1.1e-02     | 0.4900    | 0.4945 | 1 520    | 2.1 s |
+| 100 um, 500 nm, 1000 ng/g BC | 4.4e-04 | 0.8591 | 0.8649 | 31 058   | 40 s  |
+| 100 um, 500 nm, 100 ng/g BC  | 4.8e-05 | 0.9500 | 0.9531 | 200 000* | 260 s |
+
+`*` hit the scattering cap.
+
+Clean snow in the visible is `1 - omega ~ 4e-6`, another two orders of
+magnitude beyond the last row. That is the headline case — research question 1
+— and it is out of reach of a single CPU core at useful photon counts. The
+array-backend port was justified earlier as a correctness device; this table is
+the performance half of the argument, and it is measured rather than asserted.
+
+Note also that every case sits slightly *below* the oracle, by 0.3–1.5%. That
+is the direction similarity theory is known to err, and it is consistent
+across four independent cases rather than scattered — evidence the residual is
+the approximation, not the transport.
+
 ## Testing strategy
 
 Tests are organised by what they compare against, not by which module they
