@@ -44,3 +44,20 @@ class MieSolver(Protocol):
             parameter ``g = <cos(theta)>``, broadcast to a common shape.
         """
         ...
+
+    def phase_function(self, m: complex, x: float, mu: Any) -> Any:
+        """Return ``p(mu)`` normalised so ``integral p dmu = 1`` over [-1, 1].
+
+        Note the normalisation. Scattering libraries commonly normalise over
+        ``4*pi`` steradians instead, which differs by a factor of ``2*pi``.
+        The conversion belongs in the adapter so that the domain only ever
+        sees one convention.
+
+        Args:
+            m: Complex relative refractive index ``n + ik``, ``k >= 0``.
+            x: Size parameter.
+            mu: Cosines of the scattering angle. For large ``x`` this grid
+                must resolve the forward diffraction peak -- see
+                :func:`~snow_mcrt.domain.phase.forward_peaked_mu_grid`.
+        """
+        ...

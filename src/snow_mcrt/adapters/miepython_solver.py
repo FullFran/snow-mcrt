@@ -48,3 +48,25 @@ class MiepythonSolver:
             np.asarray(q_sca, dtype=float),
             np.asarray(g, dtype=float),
         )
+
+    def phase_function(
+        self, m: complex, x: float, mu: np.ndarray
+    ) -> np.ndarray:
+        """Return ``p(mu)`` normalised so ``integral p dmu = 1``.
+
+        ``miepython``'s ``norm="one"`` normalises over 4*pi steradians, so the
+        factor of ``2*pi`` converts to the per-``mu`` convention the domain
+        uses.
+        """
+        if np.imag(m) < 0:
+            raise ValueError(
+                "the domain convention is m = n + ik with k >= 0; a negative "
+                "imaginary part describes gain, not absorption"
+            )
+        mu_arr = np.asarray(mu, dtype=float)
+        if np.any(np.abs(mu_arr) > 1.0):
+            raise ValueError("mu must be a cosine, within [-1, 1]")
+        intensity = miepython.i_unpolarized(
+            np.conjugate(np.complex128(m)), float(x), mu_arr, norm="one"
+        )
+        return 2.0 * np.pi * np.asarray(intensity, dtype=float)
