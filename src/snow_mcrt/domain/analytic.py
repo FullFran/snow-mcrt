@@ -6,13 +6,27 @@ nothing to falsify it with, so these approximations are domain knowledge, not
 test scaffolding: they are what the transport must reproduce in the regimes
 where they hold, and they also answer research question 3 directly.
 
-The two-stream results here are asymptotic -- semi-infinite, homogeneous,
-diffuse illumination. That is exactly the regime deep clean snow sits in, and
-it is where a transport bug has nowhere to hide.
+**Two of them, and they are not interchangeable.** This matters enough to say
+before the code:
+
+- :func:`semi_infinite_albedo` is *two-stream*. It is an approximation and its
+  error is large away from ``omega -> 1``: measured against an accurate
+  reference it runs 19% high at ``omega = 0.5``, 8.9% high at 0.9, 3.0% high
+  at 0.99. It converges only in the conservative limit. It is the right tool
+  for understanding and for delta-Eddington work, and the wrong tool for
+  judging whether a Monte Carlo run is correct.
+- :func:`van_de_hulst_semi_infinite_albedo` is accurate to about 1% across the
+  whole range for isotropic scattering. **This is the quantitative oracle.**
+
+Clean snow in the visible sits at ``1 - omega ~ 4e-6``, deep in the regime
+where the two agree, so the albedo figures either produces there are sound.
+The distinction bites in the middle of the range, which is exactly where a
+transport bug would show up first.
 
 References:
     Wiscombe & Warren (1980), J. Atmos. Sci. 37, 2712.
     Joseph, Wiscombe & Weinman (1976), J. Atmos. Sci. 33, 2452 (delta-Eddington).
+    van de Hulst, H. C. (1974), Astron. Astrophys. 35, 209.
 """
 
 from __future__ import annotations
@@ -93,6 +107,57 @@ def semi_infinite_albedo(
         omega, g = delta_eddington_scaling(omega, g)
     s = similarity_parameter(omega, g)
     return (1.0 - s) / (1.0 + s)
+
+
+def van_de_hulst_semi_infinite_albedo(omega: np.ndarray | float) -> np.ndarray:
+    """Accurate semi-infinite albedo for **isotropic** scattering.
+
+    .. math::
+        \\alpha = \\frac{(1 - s)(1 - 0.139 s)}{1 + 1.17 s},
+        \\quad s = \\sqrt{1 - \\omega}
+
+    A fit to the exact H-function solution, good to about 1% over the whole
+    range of ``omega``. This is the quantitative oracle the Monte Carlo is
+    judged against, because :func:`semi_infinite_albedo` is not accurate
+    enough to serve: at ``omega = 0.9`` the two differ by 8.9%, which is far
+    larger than any transport bug worth catching.
+
+    Restricted to isotropic scattering by construction. Anisotropic cases are
+    reached through similarity scaling -- ``omega* = omega(1-g)/(1-omega g)``
+    -- which is itself approximate at the half-percent level.
+
+    Args:
+        omega: Single-scattering albedo in ``[0, 1]``.
+    """
+    omega = np.asarray(omega, dtype=float)
+    if np.any((omega < 0) | (omega > 1)):
+        raise ValueError("single-scattering albedo must lie in [0, 1]")
+    s = np.sqrt(1.0 - omega)
+    return (1.0 - s) * (1.0 - 0.139 * s) / (1.0 + 1.17 * s)
+
+
+def similarity_scaled_albedo(
+    omega: np.ndarray | float, g: np.ndarray | float
+) -> np.ndarray:
+    """Anisotropic semi-infinite albedo via similarity scaling.
+
+    Maps ``(omega, g)`` onto the isotropic problem with
+    ``omega* = omega(1-g)/(1-omega g)`` and evaluates
+    :func:`van_de_hulst_semi_infinite_albedo` there.
+
+    Accurate to roughly half a percent for the strongly forward-scattering
+    media snow presents, which is good enough to catch a transport bug and not
+    good enough to be called exact.
+    """
+    omega = np.asarray(omega, dtype=float)
+    g = np.asarray(g, dtype=float)
+    if np.any((omega < 0) | (omega > 1)):
+        raise ValueError("single-scattering albedo must lie in [0, 1]")
+    if np.any(np.abs(g) >= 1):
+        raise ValueError("asymmetry parameter must lie in (-1, 1)")
+    return van_de_hulst_semi_infinite_albedo(
+        omega * (1.0 - g) / (1.0 - omega * g)
+    )
 
 
 def asymptotic_extinction_coefficient(
