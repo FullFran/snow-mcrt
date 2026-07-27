@@ -171,11 +171,44 @@ NumPy oracle possible — and it is why the same physics will run on a GPU.
 Full rationale, the conventions that are silent when wrong, and the measured
 case for the GPU: [`docs/architecture.md`](docs/architecture.md).
 
+## Running on a GPU
+
+The CuPy adapter is validated on real hardware — results committed under
+[`results/kaggle/`](results/kaggle/), produced on a Tesla P100.
+
+Against the NumPy oracle, agreement tightens as the medium gets brighter:
+0.50% at `omega = 0.5`, 0.053% at 0.9, 0.016% at 0.95. More photons survive
+longer, so the estimator has more to work with.
+
+The timing is worth stating honestly, because it is not a straight win:
+
+| `omega` | NumPy | CuPy | speedup |
+| ------- | ----- | ---- | ------- |
+| 0.50 | 0.33 s | 4.43 s | **0.07x** |
+| 0.90 | 1.24 s | 0.19 s | 6.5x |
+| 0.95 | 2.74 s | 0.37 s | 7.4x |
+
+At `omega = 0.5` the transport finishes in two dozen scattering orders and
+kernel launch overhead dominates completely — the GPU is thirteen times
+*slower*. It pays in deep transport and nowhere else, which is the same
+conclusion the architecture reached from the other direction.
+
+Deep transport at 500 000 photons reproduces the analytic solution to 0.02%,
+0.08% and 0.14% at 700, 900 and 1100 nm, with `truncated = 0` throughout. The
+`1/(1 - omega)` cost law comes out measured rather than asserted: a factor of
+37 in co-albedo buys 33 times the scattering orders and 32 times the wall
+clock.
+
+```bash
+kaggle kernels push -p kaggle
+kaggle kernels output fran17/snow-mcrt-gpu-validation -p results/kaggle
+```
+
 ## Getting started
 
 ```bash
 uv venv && uv pip install -e '.[dev]'
-pytest                                    # 162 passed, 4 skipped without CUDA
+pytest                                    # 181 passed, 4 skipped without CUDA
 
 python scripts/run_albedo.py --output data/reference     # compute, draw nothing
 python scripts/plot_albedo.py --output docs/figures      # draw, compute nothing
