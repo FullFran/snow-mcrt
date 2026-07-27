@@ -1,0 +1,262 @@
+"""Snowpack composition: mixing, impurities, and the darkening they cause."""
+
+import math
+
+import numpy as np
+import pytest
+
+from snow_mcrt.adapters.miepython_solver import MiepythonSolver
+from snow_mcrt.domain.analytic import semi_infinite_albedo
+from snow_mcrt.domain.medium import (
+    BLACK_CARBON,
+    MINERAL_DUST,
+    Impurity,
+    ImpurityLoading,
+    SnowLayer,
+    compute_layer_properties,
+)
+from snow_mcrt.domain.mie import compute_mie_properties
+
+ICE_M_VISIBLE = 1.3105 + 2.0e-9j
+ICE_M_NEAR_IR = 1.2985 + 1.3e-5j
+
+
+@pytest.fixture
+def solver():
+    return MiepythonSolver()
+
+
+def layer_albedo(solver, layer, m_ice, wavelength_nm) -> float:
+    props = compute_layer_properties(solver, layer, m_ice, wavelength_nm)
+    return float(
+        semi_infinite_albedo(
+            props.single_scattering_albedo[0], props.asymmetry[0]
+        )
+    )
+
+
+def with_black_carbon(ng_per_g: float, **kwargs) -> SnowLayer:
+    loadings = (
+        (ImpurityLoading.from_ng_per_g(BLACK_CARBON, ng_per_g),)
+        if ng_per_g
+        else ()
+    )
+    return SnowLayer(
+        grain_radius_m=kwargs.pop("grain_radius_m", 100e-6),
+        density=kwargs.pop("density", 300.0),
+        impurities=loadings,
+        **kwargs,
+    )
+
+
+class TestMixingRatios:
+    def test_ng_per_g_round_trips(self):
+        loading = ImpurityLoading.from_ng_per_g(BLACK_CARBON, 250.0)
+        assert loading.ng_per_g == pytest.approx(250.0)
+        assert loading.mass_mixing_ratio == pytest.approx(250e-9)
+
+    def test_number_density_scales_with_the_mixing_ratio(self):
+        one = ImpurityLoading.from_ng_per_g(BLACK_CARBON, 100.0)
+        two = ImpurityLoading.from_ng_per_g(BLACK_CARBON, 200.0)
+        assert two.number_density(300.0) == pytest.approx(
+            2 * one.number_density(300.0)
+        )
+
+    def test_a_hundred_nanograms_per_gram_is_a_lot_of_particles(self):
+        # ~2e13 particles per cubic metre, against ~7e8 ice grains. Impurities
+        # outnumber grains by four orders of magnitude and still amount to a
+        # tenth of a part per million by mass.
+        loading = ImpurityLoading.from_ng_per_g(BLACK_CARBON, 100.0)
+        assert 1e12 < loading.number_density(300.0) < 1e15
+
+    def test_rejects_a_negative_mixing_ratio(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            ImpurityLoading(BLACK_CARBON, -1e-9)
+
+
+class TestPureSnow:
+    def test_a_layer_with_no_impurities_is_just_its_grains(self, solver):
+        # The mixture machinery must be an identity when there is nothing to
+        # mix, or every impurity result is offset by an unknown constant.
+        layer = with_black_carbon(0.0)
+        props = compute_layer_properties(solver, layer, ICE_M_VISIBLE, 500.0)
+        grains = compute_mie_properties(solver, ICE_M_VISIBLE, 100e-6, 500.0)
+        assert props.single_scattering_albedo[0] == pytest.approx(
+            grains.single_scattering_albedo[0]
+        )
+        assert props.asymmetry[0] == pytest.approx(grains.g[0])
+        assert props.extinction_coefficient[0] == pytest.approx(
+            grains.extinction_coefficient_from_density(300.0)[0]
+        )
+
+    def test_extinction_scales_with_snow_density(self, solver):
+        thin = compute_layer_properties(
+            solver, SnowLayer(100e-6, 150.0), ICE_M_VISIBLE, 500.0
+        )
+        dense = compute_layer_properties(
+            solver, SnowLayer(100e-6, 300.0), ICE_M_VISIBLE, 500.0
+        )
+        assert dense.extinction_coefficient[0] == pytest.approx(
+            2 * thin.extinction_coefficient[0]
+        )
+
+    def test_density_does_not_change_the_albedo_of_a_deep_pack(self, solver):
+        # Density sets how fast light is extinguished, not what fraction is
+        # absorbed per event. A semi-infinite pack has no bottom to reach, so
+        # its albedo is density-independent. Worth pinning: an implementation
+        # that let density leak into omega would still look plausible.
+        assert layer_albedo(
+            solver, SnowLayer(100e-6, 150.0), ICE_M_VISIBLE, 500.0
+        ) == pytest.approx(
+            layer_albedo(solver, SnowLayer(100e-6, 400.0), ICE_M_VISIBLE, 500.0)
+        )
+
+
+class TestBlackCarbon:
+    def test_darkens_the_visible_monotonically(self, solver):
+        albedos = [
+            layer_albedo(solver, with_black_carbon(ng), ICE_M_VISIBLE, 500.0)
+            for ng in (0.0, 1.0, 10.0, 100.0, 1000.0)
+        ]
+        assert np.all(np.diff(albedos) < 0)
+
+    def test_reproduces_the_published_magnitude(self, solver):
+        # Warren & Wiscombe (1980) Fig. 2: 100 ng/g of soot in snow with
+        # ~100 um grains drops visible albedo from ~0.99 to the mid 0.95s.
+        # This is research question 2, checked here at a single point before
+        # the full curve reproduction.
+        clean = layer_albedo(solver, with_black_carbon(0.0), ICE_M_VISIBLE, 500.0)
+        dirty = layer_albedo(solver, with_black_carbon(100.0), ICE_M_VISIBLE, 500.0)
+        assert clean > 0.98
+        assert 0.94 < dirty < 0.97
+
+    def test_a_part_per_billion_is_already_measurable(self, solver):
+        # The whole reason trace impurities matter: ice is so weakly absorbing
+        # in the visible that 1 ng/g of carbon competes with it.
+        clean = layer_albedo(solver, with_black_carbon(0.0), ICE_M_VISIBLE, 500.0)
+        trace = layer_albedo(solver, with_black_carbon(1.0), ICE_M_VISIBLE, 500.0)
+        assert 1e-4 < clean - trace < 1e-2
+
+    def test_barely_touches_the_asymmetry_parameter(self, solver):
+        # Impurities absorb, they do not meaningfully scatter. If g moved
+        # here, the cross-section weighting in the mixture would be wrong.
+        clean = compute_layer_properties(
+            solver, with_black_carbon(0.0), ICE_M_VISIBLE, 500.0
+        )
+        dirty = compute_layer_properties(
+            solver, with_black_carbon(1000.0), ICE_M_VISIBLE, 500.0
+        )
+        assert dirty.asymmetry[0] == pytest.approx(clean.asymmetry[0], abs=1e-3)
+
+    def test_matters_far_less_where_ice_already_absorbs(self, solver):
+        # At 1300 nm the ice itself absorbs four orders of magnitude more
+        # strongly, so carbon has almost nothing left to compete with. This
+        # is why impurity retrieval works in the visible and not the
+        # near-infrared.
+        visible_drop = layer_albedo(
+            solver, with_black_carbon(0.0), ICE_M_VISIBLE, 500.0
+        ) - layer_albedo(solver, with_black_carbon(500.0), ICE_M_VISIBLE, 500.0)
+        near_ir_drop = layer_albedo(
+            solver, with_black_carbon(0.0), ICE_M_NEAR_IR, 1300.0
+        ) - layer_albedo(solver, with_black_carbon(500.0), ICE_M_NEAR_IR, 1300.0)
+        assert visible_drop > 10 * near_ir_drop
+
+
+class TestMineralDust:
+    def test_darkens_the_visible_far_more_weakly_than_carbon(self, solver):
+        # Dust is roughly two orders of magnitude less effective per unit
+        # mass, which is why field studies report it in ppm and carbon in ppb.
+        def albedo(impurity, ng):
+            layer = SnowLayer(
+                100e-6,
+                300.0,
+                impurities=(ImpurityLoading.from_ng_per_g(impurity, ng),),
+            )
+            return layer_albedo(solver, layer, ICE_M_VISIBLE, 500.0)
+
+        clean = layer_albedo(solver, SnowLayer(100e-6, 300.0), ICE_M_VISIBLE, 500.0)
+        carbon_drop = clean - albedo(BLACK_CARBON, 1000.0)
+        dust_drop = clean - albedo(MINERAL_DUST, 1000.0)
+        assert dust_drop > 0
+        assert carbon_drop > 20 * dust_drop
+
+    def test_enough_dust_still_darkens_snow(self, solver):
+        layer = SnowLayer(
+            100e-6,
+            300.0,
+            impurities=(ImpurityLoading.from_ng_per_g(MINERAL_DUST, 100_000.0),),
+        )
+        assert layer_albedo(solver, layer, ICE_M_VISIBLE, 500.0) < 0.95
+
+
+class TestCombinedLoadings:
+    def test_two_impurities_darken_more_than_either_alone(self, solver):
+        def albedo(loadings):
+            return layer_albedo(
+                solver,
+                SnowLayer(100e-6, 300.0, impurities=loadings),
+                ICE_M_VISIBLE,
+                500.0,
+            )
+
+        carbon = ImpurityLoading.from_ng_per_g(BLACK_CARBON, 100.0)
+        dust = ImpurityLoading.from_ng_per_g(MINERAL_DUST, 100_000.0)
+        both = albedo((carbon, dust))
+        assert both < albedo((carbon,))
+        assert both < albedo((dust,))
+
+
+class TestOpticalDepth:
+    def test_is_extinction_times_thickness(self, solver):
+        layer = SnowLayer(100e-6, 300.0, thickness_m=0.05)
+        props = compute_layer_properties(solver, layer, ICE_M_VISIBLE, 500.0)
+        assert props.optical_depth[0] == pytest.approx(
+            props.extinction_coefficient[0] * 0.05
+        )
+
+    def test_a_semi_infinite_layer_has_infinite_optical_depth(self, solver):
+        props = compute_layer_properties(
+            solver, SnowLayer(100e-6, 300.0), ICE_M_VISIBLE, 500.0
+        )
+        assert np.all(np.isinf(props.optical_depth))
+
+    def test_a_five_centimetre_layer_is_already_optically_deep(self, solver):
+        # Mean free path is ~0.2 mm, so 5 cm is hundreds of optical depths.
+        # Any transport result should be indistinguishable from semi-infinite
+        # there, which is what makes the analytic oracle applicable at all.
+        layer = SnowLayer(100e-6, 300.0, thickness_m=0.05)
+        props = compute_layer_properties(solver, layer, ICE_M_VISIBLE, 500.0)
+        assert props.optical_depth[0] > 100
+
+
+class TestBroadcasting:
+    def test_evaluates_over_a_wavelength_grid(self, solver):
+        wavelengths = np.linspace(400.0, 700.0, 12)
+        m_ice = np.full(wavelengths.shape, ICE_M_VISIBLE)
+        props = compute_layer_properties(
+            solver, with_black_carbon(100.0), m_ice, wavelengths
+        )
+        assert props.single_scattering_albedo.shape == (12,)
+        assert props.extinction_coefficient.shape == (12,)
+        assert props.asymmetry.shape == (12,)
+
+
+class TestValidation:
+    def test_rejects_snow_denser_than_ice(self):
+        with pytest.raises(ValueError, match="snow density must lie"):
+            SnowLayer(100e-6, 1000.0)
+
+    def test_rejects_a_nonpositive_grain_radius(self):
+        with pytest.raises(ValueError, match="grain radius must be positive"):
+            SnowLayer(0.0, 300.0)
+
+    def test_rejects_a_nonpositive_thickness(self):
+        with pytest.raises(ValueError, match="thickness must be positive"):
+            SnowLayer(100e-6, 300.0, thickness_m=0.0)
+
+    def test_rejects_the_gain_convention_on_an_impurity(self):
+        with pytest.raises(ValueError, match="gain"):
+            Impurity("bad", 1e-7, 1800.0, 1.95 - 0.79j)
+
+    def test_a_semi_infinite_layer_is_the_default(self):
+        assert math.isinf(SnowLayer(100e-6, 300.0).thickness_m)
