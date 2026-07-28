@@ -77,10 +77,15 @@ def fresnel_reflectance(cos_incident: Any, n1: float, n2: float, xp: Any = np) -
 
     sin_t_sq = (n1 / n2) ** 2 * (1.0 - cos_i**2)
     total = sin_t_sq >= 1.0
-    # Evaluate the transmitted cosine on a clamped argument so the total
-    # internal reflection branch cannot produce a nan that then propagates
-    # through xp.where -- an unselected branch is still computed.
-    cos_t = xp.sqrt(xp.maximum(1.0 - sin_t_sq, 0.0))
+    # Past the critical angle the transmitted cosine is zero, and at grazing
+    # incidence the incident cosine is zero too -- so both Fresnel ratios
+    # become 0/0. The result there is 1.0 by the branch below, but an
+    # unselected branch of xp.where is still *evaluated*, so a nan computed
+    # here would propagate out regardless. Substituting any non-zero cosine
+    # inside the total-reflection region keeps the arithmetic finite without
+    # touching the answer.
+    cos_t = xp.where(total, 1.0, xp.sqrt(xp.maximum(1.0 - sin_t_sq, 0.0)))
+    cos_i = xp.where(total, 1.0, cos_i)
 
     r_s = (n1 * cos_i - n2 * cos_t) / (n1 * cos_i + n2 * cos_t)
     r_p = (n1 * cos_t - n2 * cos_i) / (n1 * cos_t + n2 * cos_i)
