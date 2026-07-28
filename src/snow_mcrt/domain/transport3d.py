@@ -46,13 +46,73 @@ import numpy as np
 
 from snow_mcrt.domain.analytic import delta_eddington_scaling
 from snow_mcrt.domain.fresnel import fresnel_reflectance, refract, specular_reflect
-from snow_mcrt.domain.transport import TransportConfig, _sample_hg_cosines
+from snow_mcrt.domain.geometry import Box
+from snow_mcrt.domain.transport import (
+    _ISOTROPIC_G_THRESHOLD,
+    TransportConfig,
+    _sample_hg_cosines,
+)
 from snow_mcrt.ports.backend import Backend
 
 # Below this the scattering rotation's sqrt(1 - u_z^2) loses its digits and the
 # degenerate branch is used instead. Not a tunable: it is where the general
 # formula stops being computable, not where it stops being accurate.
 _POLE_TOLERANCE = 1e-12
+
+
+@dataclass(frozen=True)
+class BuriedObject:
+    """A region of different medium inside the snowpack.
+
+    Args:
+        box: Where it is.
+        extinction_coefficient: ``beta`` inside it, m^-1. **Zero is allowed**
+            and is the most interesting case: a void. A cavity scatters
+            nothing and absorbs nothing, so photons cross it in a straight
+            line, and the perturbation to the diffuse field is larger than an
+            absorber of the same size produces -- see ``docs/detectability.md``.
+        single_scattering_albedo: ``omega`` inside it.
+        asymmetry: ``g`` inside it.
+        refractive_index: Its index. Different from the snow's means a Fresnel
+            interface at every face, which for a void is the whole signal.
+    """
+
+    box: Box
+    extinction_coefficient: float = 0.0
+    single_scattering_albedo: float = 0.0
+    asymmetry: float = 0.0
+    refractive_index: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.extinction_coefficient < 0:
+            raise ValueError("extinction coefficient must be non-negative")
+        if not 0 <= self.single_scattering_albedo <= 1:
+            raise ValueError("single-scattering albedo must lie in [0, 1]")
+        if not -1 < self.asymmetry < 1:
+            raise ValueError("asymmetry parameter must lie in (-1, 1)")
+        if self.refractive_index < 1.0:
+            raise ValueError("a refractive index below one is unphysical here")
+
+
+def _sample_hg_cosines_array(
+    backend: Backend, generator: Any, g: Any, n: int
+) -> Any:
+    """Henyey-Greenstein cosines with a per-photon asymmetry.
+
+    The scalar sampler in :mod:`~snow_mcrt.domain.transport` cannot serve two
+    media at once. Same inverse CDF, with the isotropic limit selected per
+    element rather than by an ``if`` -- and, as everywhere in this engine, the
+    general branch is evaluated even where it is not selected, so its
+    denominator is clamped rather than merely avoided.
+    """
+    xp = backend.xp
+    u = backend.random_uniform(generator, (n,))
+    safe_g = xp.where(xp.abs(g) < _ISOTROPIC_G_THRESHOLD, 1.0, g)
+    term = (1.0 - safe_g**2) / (1.0 - safe_g + 2.0 * safe_g * u)
+    anisotropic = xp.clip(
+        (1.0 + safe_g**2 - term**2) / (2.0 * safe_g), -1.0, 1.0
+    )
+    return xp.where(xp.abs(g) < _ISOTROPIC_G_THRESHOLD, 2.0 * u - 1.0, anisotropic)
 
 
 def log_radial_edges(inner_m: float, outer_m: float, count: int) -> np.ndarray:
@@ -162,6 +222,38 @@ def _initial_directions(
     )
 
 
+def _fresnel_pairwise(cos_incident: Any, n_from: Any, n_to: Any, xp: Any) -> Any:
+    """Fresnel where the two indices vary per photon.
+
+    :func:`~snow_mcrt.domain.fresnel.fresnel_reflectance` takes scalar indices
+    because the snow surface has only one pair. A face of a buried object is
+    crossed in both directions at once by different photons, so the pair is an
+    array. Same expression, same clamping inside the total-reflection region
+    for the same reason: the unselected branch is still evaluated.
+    """
+    cos_i = xp.clip(cos_incident, 0.0, 1.0)
+    ratio = n_from / n_to
+    sin_t_sq = ratio**2 * (1.0 - cos_i**2)
+    total = sin_t_sq >= 1.0
+    cos_t = xp.where(total, 1.0, xp.sqrt(xp.maximum(1.0 - sin_t_sq, 0.0)))
+    cos_i = xp.where(total, 1.0, cos_i)
+    r_s = (n_from * cos_i - n_to * cos_t) / (n_from * cos_i + n_to * cos_t)
+    r_p = (n_from * cos_t - n_to * cos_i) / (n_from * cos_t + n_to * cos_i)
+    matched = n_from == n_to
+    reflectance = xp.where(total, 1.0, 0.5 * (r_s**2 + r_p**2))
+    return xp.where(matched, 0.0, reflectance)
+
+
+def _refract_pairwise(
+    direction: Any, normal: Any, n_from: Any, n_to: Any, xp: Any
+) -> Any:
+    """Snell's law with per-photon indices."""
+    ratio = (n_from / n_to)[..., None]
+    cos_i = -xp.sum(direction * normal, axis=-1, keepdims=True)
+    cos_t = xp.sqrt(xp.maximum(1.0 - ratio**2 * (1.0 - cos_i**2), 0.0))
+    return ratio * direction + (ratio * cos_i - cos_t) * normal
+
+
 def _rotate(backend: Backend, direction: Any, cos_theta: Any, phi: Any) -> Any:
     """Deflect each direction by ``theta`` about itself, then ``phi`` around it.
 
@@ -214,6 +306,7 @@ def run_transport_3d(
     ambient_index: float = 1.0,
     radial_edges_m: np.ndarray | None = None,
     phase: Any = None,
+    obj: BuriedObject | None = None,
     keep_directions: bool = False,
 ) -> Transport3DResult:
     """Trace photons through a semi-infinite medium with a Fresnel surface.
@@ -277,6 +370,17 @@ def run_transport_3d(
     direction = _initial_directions(backend, generator, n, incidence)
     weight = xp.ones(n)
     alive = xp.ones(n, dtype=bool)
+    # Which medium each photon is in. A photon starts at the surface, so it
+    # starts in the snow whatever the object is.
+    inside_object = xp.zeros(n, dtype=bool)
+
+    if obj is None:
+        beta_in, omega_in, g_in, index_in = beta, omega, g, surface_index
+    else:
+        beta_in = obj.extinction_coefficient
+        omega_in = obj.single_scattering_albedo
+        g_in = obj.asymmetry
+        index_in = obj.refractive_index
 
     binned = xp.zeros(n_bins)
     reflected = 0.0
@@ -294,8 +398,21 @@ def run_transport_3d(
             break
         scatters += 1
 
+        # Optical properties follow the photon, not the run. Where they are
+        # uniform this collapses to the scalars it started as.
+        beta_p = xp.where(inside_object, beta_in, beta)
+        omega_p = xp.where(inside_object, omega_in, omega)
+        g_p = xp.where(inside_object, g_in, g)
+
         u = backend.random_uniform(generator, (n,))
-        free_path = -xp.log(xp.maximum(u, 1e-300)) / beta
+        # beta = 0 is a void: nothing to collide with, so the free path is
+        # infinite and the photon always reaches a face first. Dividing by it
+        # is the obvious way to turn a cavity into a nan.
+        free_path = xp.where(
+            beta_p > 0,
+            -xp.log(xp.maximum(u, 1e-300)) / xp.maximum(beta_p, 1e-300),
+            xp.inf,
+        )
 
         # Distance to the surface along the current direction. Only photons
         # heading upward can reach it; for the rest it is unreachable and the
@@ -306,8 +423,22 @@ def run_transport_3d(
             heading_up, position[:, 2] / xp.maximum(-uz, 1e-300), xp.inf
         )
 
-        hits_surface = alive & (to_surface < free_path)
-        step = xp.where(hits_surface, to_surface, free_path)
+        if obj is None:
+            to_object = xp.full(n, xp.inf)
+            object_normal = None
+        else:
+            to_object, object_normal = obj.box.distance_to_surface(
+                position, direction, xp=xp
+            )
+
+        # Whichever interface is nearer, and then only if the free path does
+        # not get there first. Three competitors, one minimum.
+        object_first = to_object < to_surface
+        to_interface = xp.minimum(to_surface, to_object)
+        reaches_interface = alive & (to_interface < free_path)
+        hits_object = reaches_interface & object_first
+        hits_surface = reaches_interface & ~object_first
+        step = xp.where(reaches_interface, to_interface, free_path)
         position = xp.where(
             alive[:, None], position + step[:, None] * direction, position
         )
@@ -346,12 +477,42 @@ def run_transport_3d(
             )
             alive = alive & ~escapes
 
+        if obj is not None and bool(backend.to_numpy(hits_object.any())):
+            # Which way across the face, and therefore which pair of indices.
+            # A photon inside is leaving; one outside is entering.
+            n_from = xp.where(inside_object, index_in, surface_index)
+            n_to = xp.where(inside_object, surface_index, index_in)
+            cos_incident = -xp.sum(direction * object_normal, axis=-1)
+
+            if index_in == surface_index:
+                # Matched faces are not an interface at all. Skipping the
+                # draw here keeps a matched object bit-identical to no object
+                # in everything except where the steps were split.
+                crosses = hits_object
+            else:
+                reflectance = _fresnel_pairwise(cos_incident, n_from, n_to, xp)
+                draw = backend.random_uniform(generator, (n,))
+                crosses = hits_object & (draw >= reflectance)
+                turned = hits_object & ~crosses
+                direction = xp.where(
+                    turned[:, None],
+                    specular_reflect(direction, object_normal, xp=xp),
+                    direction,
+                )
+                direction = xp.where(
+                    crosses[:, None],
+                    _refract_pairwise(direction, object_normal, n_from, n_to, xp),
+                    direction,
+                )
+            # The region changes only for photons that actually got through.
+            inside_object = xp.where(crosses, ~inside_object, inside_object)
+
         # Only photons that reached a scattering event interact. A photon that
         # spent its step arriving at the surface has not yet met a grain.
-        interacts = alive & ~hits_surface
-        deposited = xp.where(interacts, weight * (1.0 - omega), 0.0)
+        interacts = alive & ~reaches_interface
+        deposited = xp.where(interacts, weight * (1.0 - omega_p), 0.0)
         absorbed += float(backend.to_numpy(deposited.sum()))
-        weight = xp.where(interacts, weight * omega, weight)
+        weight = xp.where(interacts, weight * omega_p, weight)
 
         if config.roulette_threshold > 0:
             faint = alive & (weight < config.roulette_threshold)
@@ -362,7 +523,7 @@ def run_transport_3d(
             alive = alive & ~killed
 
         if phase is None:
-            cos_theta = _sample_hg_cosines(backend, generator, g, n)
+            cos_theta = _sample_hg_cosines_array(backend, generator, g_p, n)
         else:
             cos_theta = phase.sample(backend, generator, (n,))
         phi = 2.0 * np.pi * backend.random_uniform(generator, (n,))
