@@ -10,8 +10,18 @@ diffuse reflectance, the sensitivity kernel, the extrapolated boundary — so
 every figure and every number below is produced by code under test rather than
 by arithmetic in a margin.
 
-What does *not* exist: three-dimensional transport, ray-object intersection,
-detectors, or any object in any snowpack. Those are scoped at the end.
+**Three-dimensional transport now exists**, in `snow_mcrt.domain.transport3d`,
+with a real Fresnel surface at `n = 1.31`. That matters here for one reason:
+diffusion theory is an *approximation*, and until there was a transport
+solution to compare it against, none of the numbers in this note had a stated
+accuracy. They do now — see [Where diffusion holds](#where-diffusion-holds),
+and read every figure below through it.
+
+What still does *not* exist: ray-object intersection, detectors, or any object
+in any snowpack. Those are scoped at the end. The engine was deliberately
+validated against its one available oracle before geometry was added to it, so
+that a later disagreement can be blamed on the geometry rather than argued
+about.
 
 **Updated with the real dataset.** An earlier version of this note used
 order-of-magnitude placeholders for the ice absorption. Warren & Brandt (2008)
