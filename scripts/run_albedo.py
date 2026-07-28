@@ -23,7 +23,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from snow_mcrt.adapters.cached_mie_solver import CachedMieSolver  # noqa: E402
+from snow_mcrt.adapters.cached_mie_solver import (  # noqa: E402
+    CachedMieSolver,
+    frozen_table_paths,
+)
 from snow_mcrt.adapters.miepython_solver import MiepythonSolver  # noqa: E402
 from snow_mcrt.adapters.numpy_backend import NumpyBackend  # noqa: E402
 from snow_mcrt.adapters.tabulated_constants import TabulatedConstants  # noqa: E402
@@ -37,6 +40,9 @@ from snow_mcrt.infra.writers import write_result  # noqa: E402
 DEFAULT_CONSTANTS = (
     Path(__file__).resolve().parent.parent / "data" / "ice" / "warren_brandt_2008.dat"
 )
+# The committed Mie table. Read-only here: it is regenerated deliberately by
+# scripts/build_mie_cache.py, never as a side effect of a run.
+MIE_TABLE_DIR = Path(__file__).resolve().parent.parent / "data" / "mie"
 
 # Wiscombe & Warren (1980) span the solar spectrum. 300 nm is the short-wave
 # end of the usable ice data; below 390 nm the tabulated k is a reported upper
@@ -154,7 +160,11 @@ def main() -> int:
     with ExitStack() as stack:
         solver = MiepythonSolver()
         if not args.no_cache:
-            solver = stack.enter_context(CachedMieSolver(solver))
+            solver = stack.enter_context(
+                CachedMieSolver(
+                    solver, frozen_paths=frozen_table_paths(solver, MIE_TABLE_DIR)
+                )
+            )
         status = generate(args, solver)
         if isinstance(solver, CachedMieSolver):
             print(f"mie cache         : {solver.hits} reused,"

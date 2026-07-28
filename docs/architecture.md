@@ -127,16 +127,74 @@ times on its *first* run, because its redundancy is within the process.
 `run_albedo.py` gains almost nothing there — its nine curves genuinely need
 different grain populations — and everything on the rerun.
 
-The cache lives outside the working tree (`SNOW_MCRT_CACHE_DIR`, else the XDG
-cache home), because a cache under the repository is a cache that eventually
-lands in a commit. It is an optimisation and fails like one: a corrupt,
-truncated, or version-mismatched file costs time and never a run. Saves merge
-with what is already on disk and land through `os.replace`, so two scripts
-running at once neither tear a file nor erase each other's work.
+It is an optimisation and fails like one: a corrupt, truncated, or
+version-mismatched file costs time and never a run. Saves merge with what is
+already on disk and land through `os.replace`, so two scripts running at once
+neither tear a file nor erase each other's work.
 
 `phase_function` is deliberately not cached. An entry is an array over the
 angle grid rather than three floats, and nothing in the spectral pipeline
 calls it in a loop — a lot of disk for no measured time.
+
+### Two tables, because there are two jobs
+
+The obvious next question is whether the table behind the *committed* results
+should itself be committed. It should — but not the same file.
+
+- **`data/mie/` — frozen, committed, read-only.** It covers exactly the
+  configurations that produced the CSVs in `data/reference` and the figures in
+  `docs/figures`, and it is regenerated deliberately by
+  `scripts/build_mie_cache.py`. `--check` reports whether it still covers
+  every published run. 26 218 distinct points, 1.3 MB, seven minutes to
+  rebuild from nothing.
+- **`$SNOW_MCRT_CACHE_DIR` (default `~/.cache/snow-mcrt`) — mutable, local.**
+  Scratch space that grows on its own as grids are widened and figures tuned.
+
+Readers consult both and write only to the local one, so points already in the
+frozen table are never copied into it.
+
+The split is not fastidiousness. `npz` is compressed binary, so git cannot
+delta it: a *mutable* cache under version control would rewrite the whole file
+on every run and turn the history into a pile of blobs. A table regenerated on
+purpose changes when the published results change, which is what a
+reproducibility artifact should do.
+
+The point of committing it is not the disk it saves on a rerun — the CSVs and
+manifests already reproduce the published figures without any physics. It is
+the person who clones the repository to run a configuration that *does not*
+exist yet: a new impurity loading, a different density, another layer
+thickness. The CSVs cannot help them; the table can, and saves them four
+minutes of saturated CPU.
+
+### Provenance, and why a mismatch recomputes
+
+A committed table needs a stamp, and the bit-exact key is exactly why. Without
+one, a reader on a newer `miepython` asks for a point, gets a **hit**, and
+walks away with someone else's numbers believing they are their own. A cache
+able to silently mask a change of solver is not a cache; it is a way to
+invalidate a validation, in a repository whose entire claim is agreement with
+published benchmarks to a stated residual.
+
+So every table carries solver, solver version, NumPy version, and platform,
+and a stamp that does not match is **refused and recomputed** — with a warning,
+because silence there would look exactly like "the committed table did not
+cover your grid", a different and much less interesting problem. This is the
+same choice `OpticalConstants.m_at` makes when asked to extrapolate: raise
+rather than quietly serve a plausible number.
+
+Two consequences follow, and both are accepted rather than worked around.
+`version` is part of the `MieSolver` port, because a number nobody can
+attribute to a specific implementation is not evidence. And `miepython` is
+pinned exactly in `pyproject.toml` rather than floated, because a committed
+table attributable to "some 3.x" is not attributable at all — and under a
+floating range the stamp would drift and the table would quietly stop being
+used. The honest cost: on a machine whose environment differs, the committed
+table buys nothing. That is the price of not lying about where a number came
+from.
+
+The Python patch version is deliberately *not* in the stamp. The series is
+evaluated in NumPy, and pinning tables to an interpreter release would refuse
+them after an upgrade that cannot have changed a result.
 
 ## Conventions fixed once, at the boundary
 
