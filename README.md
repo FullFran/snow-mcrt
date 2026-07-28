@@ -156,10 +156,12 @@ src/snow_mcrt/
     analytic.py    closed-form solutions -- the oracle
   ports/         backend (NumPy/CuPy), Mie solver, optical data
   adapters/      NumPy is the oracle, not a fallback; CuPy; miepython
+                 plus a caching decorator over the Mie port
   application/   one use case per research question
   infra/         CSV and manifest writers
 scripts/         run (headless, draws nothing) and plot (never simulates)
 data/ice/        optical constants, with provenance
+data/mie/        committed Mie table, stamped with what produced it
 data/reference/  committed results, so figures reproduce without re-running physics
 ```
 
@@ -208,7 +210,7 @@ kaggle kernels output fran17/snow-mcrt-gpu-validation -p results/kaggle
 
 ```bash
 uv venv && uv pip install -e '.[dev]'
-pytest                                    # 181 passed, 4 skipped without CUDA
+pytest                                    # 241 passed, 4 skipped without CUDA
 
 python scripts/run_albedo.py --output data/reference     # compute, draw nothing
 python scripts/plot_albedo.py --output docs/figures      # draw, compute nothing
@@ -218,6 +220,35 @@ That split is deliberate. `run_albedo.py` opens no windows, so it runs
 unchanged in a batch job; `plot_albedo.py` reads committed CSVs, so a figure
 can be restyled without waiting on any physics. Every run writes a manifest
 recording every parameter that produced it, seed included.
+
+Mie evaluation at snow size parameters is the expensive part, and it repeats:
+of the 19 578 `(m, x)` points the detectability figures request, only 1 258 are
+distinct. Every run script memoises them, keyed on the exact bits of the input
+so a hit can only ever return what the solver itself would have. `run_albedo.py`
+goes from 237 s to 0.6 s on a rerun, with the output CSVs byte-for-byte
+identical. Pass `--no-cache` to evaluate everything from scratch.
+
+Two tables, because there are two jobs. `data/mie/` is **committed**: it covers
+the configurations behind the published results, so cloning is enough to vary
+one of those runs without first spending four minutes of CPU re-deriving
+settled numbers. It is regenerated deliberately, never as a side effect:
+
+```bash
+python scripts/build_mie_cache.py            # rebuild it
+python scripts/build_mie_cache.py --check    # does it still cover every published run?
+```
+
+The working cache lives in `$SNOW_MCRT_CACHE_DIR` (default
+`~/.cache/snow-mcrt`) and stays out of the tree — `npz` is compressed binary
+that git cannot delta, so a mutable table under version control would rewrite
+itself on every run.
+
+Every table records the solver, its version, NumPy, and the platform, and a
+stamp that does not match is **refused and recomputed**. Without that, a reader
+on a newer `miepython` would get a bit-exact *hit* and walk away with someone
+else's numbers believing they were their own — a cache that can silently mask a
+change of solver is a way to invalidate a validation. That is also why
+`miepython` is pinned exactly rather than floated.
 
 CuPy is optional (`pip install -e '.[gpu]'`). Without it the GPU tests skip and
 everything else runs.

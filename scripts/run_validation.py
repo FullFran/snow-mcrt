@@ -14,12 +14,17 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from snow_mcrt.adapters.cached_mie_solver import (  # noqa: E402
+    CachedMieSolver,
+    frozen_table_paths,
+)
 from snow_mcrt.adapters.miepython_solver import MiepythonSolver  # noqa: E402
 from snow_mcrt.adapters.tabulated_constants import TabulatedConstants  # noqa: E402
 from snow_mcrt.application.validate_tartes import (  # noqa: E402
@@ -30,6 +35,9 @@ from snow_mcrt.application.validate_tartes import (  # noqa: E402
 DEFAULT_CONSTANTS = (
     Path(__file__).resolve().parent.parent / "data" / "ice" / "warren_brandt_2008.dat"
 )
+# The committed Mie table. Read-only here: it is regenerated deliberately by
+# scripts/build_mie_cache.py, never as a side effect of a run.
+MIE_TABLE_DIR = Path(__file__).resolve().parent.parent / "data" / "mie"
 GRAIN_RADII_UM = (50.0, 100.0, 250.0, 500.0, 1000.0)
 
 
@@ -44,14 +52,8 @@ def write_csv(comparison, path: Path) -> Path:
     return path
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=Path("data/validation"))
-    parser.add_argument("--constants", type=Path, default=DEFAULT_CONSTANTS)
-    parser.add_argument("--points", type=int, default=120)
-    args = parser.parse_args()
-
-    solver = MiepythonSolver()
+def compare(args: argparse.Namespace, solver) -> int:
+    """Run every grain size, using the solver it is handed."""
     constants = TabulatedConstants(
         args.constants, name="Warren & Brandt 2008", wavelength_scale_to_nm=1000.0
     ).load()
@@ -84,6 +86,33 @@ def main() -> int:
     print()
     print(f"written to {args.output}")
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=Path("data/validation"))
+    parser.add_argument("--constants", type=Path, default=DEFAULT_CONSTANTS)
+    parser.add_argument("--points", type=int, default=120)
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="evaluate every Mie point from scratch instead of reusing the table",
+    )
+    args = parser.parse_args()
+
+    with ExitStack() as stack:
+        solver = MiepythonSolver()
+        if not args.no_cache:
+            solver = stack.enter_context(
+                CachedMieSolver(
+                    solver, frozen_paths=frozen_table_paths(solver, MIE_TABLE_DIR)
+                )
+            )
+        status = compare(args, solver)
+        if isinstance(solver, CachedMieSolver):
+            print(f"Mie cache: {solver.hits} reused, {solver.misses} evaluated"
+                  f" ({solver.cache_path})")
+    return status
 
 
 if __name__ == "__main__":

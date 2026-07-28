@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 import matplotlib
@@ -31,6 +32,10 @@ from matplotlib.patches import Circle, FancyArrowPatch, Rectangle  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from snow_mcrt.adapters.cached_mie_solver import (  # noqa: E402
+    CachedMieSolver,
+    frozen_table_paths,
+)
 from snow_mcrt.adapters.miepython_solver import MiepythonSolver  # noqa: E402
 from snow_mcrt.adapters.tabulated_constants import TabulatedConstants  # noqa: E402
 from snow_mcrt.domain.diffusion import (  # noqa: E402
@@ -53,6 +58,9 @@ ACCENT = "#c1440e"
 DEFAULT_CONSTANTS = (
     Path(__file__).resolve().parent.parent / "data" / "ice" / "warren_brandt_2008.dat"
 )
+# The committed Mie table. Read-only here: it is regenerated deliberately by
+# scripts/build_mie_cache.py, never as a side effect of a run.
+MIE_TABLE_DIR = Path(__file__).resolve().parent.parent / "data" / "mie"
 
 # Representative loadings, with the places they correspond to.
 LOADINGS = [
@@ -322,22 +330,45 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("docs/figures"))
     parser.add_argument("--constants", type=Path, default=DEFAULT_CONSTANTS)
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="evaluate every Mie point from scratch instead of reusing the table",
+    )
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
-    solver = MiepythonSolver()
     constants = TabulatedConstants(
         args.constants, name="Warren & Brandt 2008", wavelength_scale_to_nm=1000.0
     ).load()
 
-    written = [
-        figure_penetration(solver, constants, args.output / "detect-penetration.png"),
-        figure_banana(solver, constants, args.output / "detect-banana.png"),
-        figure_detectability_map(
-            solver, constants, args.output / "detect-map.png"
-        ),
-        figure_geometry(solver, constants, args.output / "detect-geometry.png"),
-    ]
+    # The detectability map sweeps impurity loading over a fixed ice grain
+    # population, so every one of its iterations asks for the same Mie table.
+    # Uncached, regenerating these four figures recomputes it start to finish
+    # each time.
+    with ExitStack() as stack:
+        solver = MiepythonSolver()
+        if not args.no_cache:
+            solver = stack.enter_context(
+                CachedMieSolver(
+                    solver, frozen_paths=frozen_table_paths(solver, MIE_TABLE_DIR)
+                )
+            )
+
+        written = [
+            figure_penetration(
+                solver, constants, args.output / "detect-penetration.png"
+            ),
+            figure_banana(solver, constants, args.output / "detect-banana.png"),
+            figure_detectability_map(
+                solver, constants, args.output / "detect-map.png"
+            ),
+            figure_geometry(solver, constants, args.output / "detect-geometry.png"),
+        ]
+        if isinstance(solver, CachedMieSolver):
+            print(f"  mie cache: {solver.hits} reused, {solver.misses} evaluated"
+                  f" ({solver.cache_path})")
+
     for path in written:
         print(f"  {path}")
     return 0
