@@ -10,8 +10,25 @@ diffuse reflectance, the sensitivity kernel, the extrapolated boundary — so
 every figure and every number below is produced by code under test rather than
 by arithmetic in a margin.
 
-What does *not* exist: three-dimensional transport, ray-object intersection,
-detectors, or any object in any snowpack. Those are scoped at the end.
+**Three-dimensional transport now exists**, in `snow_mcrt.domain.transport3d`,
+with a real Fresnel surface at `n = 1.31`, ray-box intersection in
+`snow_mcrt.domain.geometry`, and objects that carry their own extinction,
+albedo and refractive index. Two things follow.
+
+Diffusion theory is an *approximation*, and until there was a transport
+solution to compare it against, none of the numbers in this note had a stated
+accuracy. They do now — see [Where diffusion holds](#where-diffusion-holds),
+and read every figure below through it. The engine was deliberately validated
+against its one available oracle *before* geometry was added, so that a later
+disagreement can be blamed on the geometry rather than argued about.
+
+And the central question of this note — how fast an object stops being visible
+with depth — has been answered by tracing photons rather than by argument. See
+[How fast detection actually fades](#how-fast-detection-actually-fades).
+
+What still does *not* exist: detectors with a real aperture and acceptance
+angle, non-spherical grains, layered snowpacks, and any object that is not an
+axis-aligned box. Those are scoped at the end.
 
 **Updated with the real dataset.** An earlier version of this note used
 order-of-magnitude placeholders for the ice absorption. Warren & Brandt (2008)
@@ -47,6 +64,129 @@ Snow is a *better* diffuser than tissue: `omega` closer to 1, comparable `g`.
 Diffusion theory is more reliable here, not less, which means the analytic
 machinery transfers with the approximations in better shape than the people
 who developed them enjoyed.
+
+That was an argument. Below it is a measurement.
+
+## Where diffusion holds
+
+Every figure in this note is a diffusion calculation, so the first question a
+reader should ask is how wrong diffusion is. Until the 3-D engine existed there
+was no way to answer; now there is, because transport makes no closure
+assumption at all and can simply be run.
+
+![Where diffusion holds](figures/detect-diffusion-validity.png)
+
+Measured on a Tesla P100 at **two million photons per case**, over four
+snowpacks spanning three orders of magnitude in co-albedo
+([`results/kaggle/`](../results/kaggle/)):
+
+| case | `1 - omega` | `delta` | 3–12 `mfp'` | all `< 12 mfp'` | 12–50 `mfp'` |
+| ---- | ----------- | ------- | ----------- | --------------- | ------------ |
+| clean, 450 nm | 3.3e-07 | 91.3 cm | **9.0%** | 19.9% | 8.6% |
+| Arctic, 450 nm | 7.9e-06 | 18.5 cm | **9.3%** | 20.1% | 8.4% |
+| alpine, 450 nm | 7.6e-05 | 6.0 cm | **10.6%** | 20.5% | 7.0% |
+| alpine, 800 nm | 3.0e-04 | 3.0 cm | **10.9%** | 21.0% | 5.3% |
+
+Each entry is the largest departure of `R_MC(rho) / R_diffusion(rho)` from one
+inside that band.
+
+**Read the first column, not the second.** Inside about three transport mean
+free paths diffusion is not a poor approximation, it is an inapplicable one:
+the photon has not yet forgotten which way it was going, which is the entire
+premise. The innermost bin comes back at 0.79–0.80 in all four cases — the
+premise failing, not the approximation degrading. A worst case taken over
+everything closer than 12 `mfp'` is dominated by that region and doubles the
+apparent error.
+
+So: **diffusion is good to about 10% over the separations a source-detector
+pair actually uses, and to 5–9% from 12 to 50 transport mean free paths.**
+Every depth and contrast in this note inherits that.
+
+The shape is worth stating because it is not the obvious one. The ratio dips
+below one at the source, crosses one between three and seven `mfp'`, peaks
+near 1.03, and settles around 0.93 further out. It is **not monotonic**, and
+an earlier reading of a narrower range suggested it was — diffusion does not
+simply degrade with distance, it errs in one direction near the source and the
+other beyond.
+
+Beyond about 50 `mfp'` the comparison stops being a measurement of diffusion
+and starts being a measurement of photon budget. The profile falls seven
+orders of magnitude, so the far bins starve long before the near ones; one
+clean-snow bin came back at 0.085 on two million photons. Those bins are
+reported and not interpreted.
+
+Two things had to line up before any of this meant anything. Both solvers must
+see the same **surface** — diffusion carries the index mismatch as an
+effective internal reflection coefficient and the engine carries it as Fresnel
+at each escape, and the two agree to 0.07% (asserted in `tests/test_fresnel.py`).
+And both must see the same **source**, so the engine runs a collimated pencil
+beam to match the Green's function.
+
+### The band is reproducible on a laptop; the reflectance is not
+
+Worth separating, because the two have different budgets.
+
+`data/validation/mc-diffusion-*.csv` holds the same four cases at 120 000
+photons — about twenty minutes on one core. Against the GPU runs at two
+million:
+
+| case | band, CPU | band, GPU | reflected, CPU | reflected, GPU |
+| ---- | --------- | --------- | -------------- | -------------- |
+| clean, 450 nm | 8.8% | 9.0% | 0.9548 | **0.9915** |
+| Arctic, 450 nm | 8.2% | 9.3% | 0.9463 | **0.9633** |
+| alpine, 450 nm | 11.4% | 10.6% | 0.8905 | 0.8912 |
+| alpine, 800 nm | 11.4% | 10.9% | 0.7954 | 0.7950 |
+
+The band agrees to **1.1 points** while the total reflectance is off by **3.7**
+on clean snow. That is not luck. Truncating a run discards the photons with
+the longest paths, and those are the ones populating the far tail and the
+total; the intermediate field is made of photons that left long before the
+budget ran out.
+
+So a laptop can measure *where diffusion holds*, which is what this note needs.
+It cannot measure *how much light comes back* from clean snow in the visible —
+nothing on a CPU can, and a run that reports 0.9548 for a quantity that is
+0.9915 does not announce itself. Only the `truncated` column distinguishes it
+from a converged answer.
+
+## How fast detection actually fades
+
+![Detection contrast against burial depth](figures/detect-transport-depth.png)
+
+Every depth number further down this note comes from diffusion theory and a
+two-way attenuation argument. This one comes from tracing photons past an
+object that is actually there.
+
+A 20 cm slab, buried at a series of depths, in snow whose penetration depth is
+6 cm. Depth is in units of `delta` so the curve transfers; contrast is the
+fractional change in returned light, which is what an instrument measures
+against an unknown source brightness.
+
+| depth | black slab | void |
+| ----- | ---------- | ---- |
+| 0.1 δ | **−52.9%** | −17.6% |
+| 0.6 δ | −8.5% | −3.8% |
+| 1.1 δ | −2.4% | −1.4% |
+| 1.6 δ | −0.7% | −0.4% |
+
+Three things worth taking from it.
+
+**The fall is steep — roughly a factor of six per penetration depth.** That is
+the two-way attenuation the note argues for, now measured rather than assumed:
+light has to reach the object and come back, so the signal goes as `exp(-2z/δ)`
+rather than `exp(-z/δ)`.
+
+**A void is a third as visible as a black slab, and it absorbs nothing.** It
+removes light by carrying photons in a straight line to its far wall, well
+below the depth anything returns from — a light pipe pointing away from the
+detector. The note predicted cavities would perturb strongly; the sign and the
+size are now measured.
+
+**The floor is a budget, not a physical limit.** The shaded band is three times
+the Monte Carlo noise floor at 40 000 photons, and everything below it is
+noise that a log axis renders as a convincing curve. It falls as `1/sqrt(N)`,
+so four times the photons buys about another third of a penetration depth —
+which is exactly why the deep cases run on a GPU.
 
 ## The figures
 
