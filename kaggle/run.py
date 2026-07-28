@@ -279,6 +279,125 @@ def diffusion_validity() -> dict:
     return {"diffusion_validity": rows}
 
 
+def detection_profiles() -> dict:
+    """Contrast against source-detector separation, at several burial depths.
+
+    The measurement, rather than the shadow of it. Total returned light
+    dilutes the signal across a field most of which never met the object:
+    photons coming back close to the source went shallowest and carry the
+    least about anything buried. Separation is a depth selector.
+
+    It belongs on a GPU for the same reason the diffusion comparison does,
+    only more so. The profile has to be resolved *per depth*, so every bin
+    needs enough photons on its own, and the far bins -- the ones that carry
+    the signal -- are the starved ones. Clean visible snow needs of order a
+    million scattering orders per photon on top of that.
+
+    The reference snowpack is traced once and shared across depths: it does
+    not depend on where the object would have been, and a shared reference
+    means the only thing differing between two depths is the object.
+    """
+    import csv
+
+    import numpy as np
+
+    from snow_mcrt.adapters.cupy_backend import CupyBackend
+    from snow_mcrt.adapters.miepython_solver import MiepythonSolver
+    from snow_mcrt.adapters.tabulated_constants import TabulatedConstants
+    from snow_mcrt.application.detection import sweep_contrast_profiles
+    from snow_mcrt.domain.diffusion import DiffusionParameters
+    from snow_mcrt.domain.medium import (
+        BLACK_CARBON,
+        ImpurityLoading,
+        SnowLayer,
+        compute_layer_properties,
+    )
+    from snow_mcrt.domain.transport import TransportConfig
+
+    constants = TabulatedConstants(
+        _constants_path(), name="Warren & Brandt 2008", wavelength_scale_to_nm=1000.0
+    ).load()
+    solver = MiepythonSolver()
+    backend = CupyBackend()
+
+    grid = np.array([450.0])
+    props = compute_layer_properties(
+        solver,
+        SnowLayer(
+            100e-6,
+            300.0,
+            impurities=(ImpurityLoading.from_ng_per_g(BLACK_CARBON, 100.0),),
+        ),
+        constants.m_at(grid),
+        grid,
+    )
+    omega = float(props.single_scattering_albedo[0])
+    g = float(props.asymmetry[0])
+    beta = float(props.extinction_coefficient[0])
+    delta = DiffusionParameters.from_optical_properties(
+        omega, g, beta, refractive_index=1.31
+    ).penetration_depth
+
+    depths = np.array([0.15, 0.35, 0.6, 1.0, 1.5, 2.2]) * delta
+    started = time.time()
+    # delta_scaled=False because the path lengths are an output here. Delta
+    # scaling preserves the diffusion limit but not the geometry, and a
+    # time-of-flight number from a scaled medium is not one.
+    profiles = sweep_contrast_profiles(
+        backend,
+        omega,
+        g,
+        beta,
+        depths_m=depths,
+        config=TransportConfig(
+            n_photons=1_000_000, seed=11, max_scatters=200_000, delta_scaled=False
+        ),
+    )
+    elapsed = round(time.time() - started, 1)
+
+    rows = []
+    for profile in profiles:
+        path = OUTPUT / f"detection-profile-{profile.depth_m / delta:.2f}delta.csv"
+        with path.open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            columns = profile.columns()
+            sampled = profile.sampled
+            writer.writerow(columns.keys())
+            for values in zip(*(np.asarray(v)[sampled] for v in columns.values())):
+                writer.writerow(f"{value:.10g}" for value in values)
+
+        best = profile.best
+        integrated = float(
+            (profile.with_object.sum() - profile.plain.sum()) / profile.plain.sum()
+        )
+        row = {
+            "depth_m": profile.depth_m,
+            "depth_in_penetration_depths": profile.depth_m / delta,
+            "contrast_integrated": integrated,
+            "contrast_best": float(profile.contrast[best]),
+            "best_rho_m": float(profile.rho_m[best]),
+            "best_rho_in_penetration_depths": float(
+                profile.rho_in_penetration_depths[best]
+            ),
+            "best_snr": float(profile.snr[best]),
+            "path_contrast_at_best": float(profile.path_contrast[best]),
+            "gain_over_integrating": abs(float(profile.contrast[best]) / integrated)
+            if integrated
+            else float("nan"),
+        }
+        rows.append(row)
+        print(json.dumps(row), flush=True)
+
+    return {
+        "detection_profiles": {
+            "penetration_depth_cm": delta * 100,
+            "co_albedo": 1.0 - omega,
+            "seconds": elapsed,
+            "points": rows,
+        }
+    }
+
+
 def _constants_path() -> str:
     """The ice constants fetched alongside the install."""
     if not CONSTANTS.exists():
@@ -292,6 +411,7 @@ def main() -> int:
     manifest.update(cross_check_backends())
     manifest.update(clean_snow_visible())
     manifest.update(diffusion_validity())
+    manifest.update(detection_profiles())
     (OUTPUT / "gpu-validation.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"written to {OUTPUT / 'gpu-validation.json'}", flush=True)
     return 0

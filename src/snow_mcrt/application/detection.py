@@ -222,6 +222,95 @@ class DepthSweep:
         }
 
 
+def sweep_contrast_profiles(
+    backend: Backend,
+    single_scattering_albedo: float,
+    asymmetry: float,
+    extinction_coefficient: float,
+    depths_m: np.ndarray,
+    half_width_m: float = 0.10,
+    thickness_m: float = 0.20,
+    object_extinction: float = 1e5,
+    object_albedo: float = 0.0,
+    object_index: float = 1.31,
+    config: TransportConfig | None = None,
+    surface_index: float = 1.31,
+    inner_mfp: float = 1.0,
+    outer_depths: float = 6.0,
+    n_bins: int = 14,
+) -> list[ContrastProfile]:
+    """One profile per burial depth, sharing a single reference run.
+
+    The snowpack with nothing in it does not depend on where the object would
+    have been, so running it once per depth was pure waste. Worse, it put an
+    independent realisation of the reference under every point, adding noise
+    to a comparison whose entire job is to be quiet: with a shared reference
+    the only thing that differs between two depths is the object.
+
+    Halves the cost of a sweep, which matters because each run is a full
+    transport solution.
+
+    Returns:
+        A profile per entry in ``depths_m``, in that order.
+    """
+    config = config or TransportConfig()
+    parameters = DiffusionParameters.from_optical_properties(
+        single_scattering_albedo,
+        asymmetry,
+        extinction_coefficient,
+        refractive_index=surface_index,
+    )
+    edges = log_radial_edges(
+        inner_mfp * parameters.transport_mean_free_path,
+        outer_depths * parameters.penetration_depth,
+        n_bins,
+    )
+
+    def trace(obj):
+        return run_transport_3d(
+            backend,
+            extinction_coefficient,
+            single_scattering_albedo,
+            asymmetry,
+            config=config,
+            incidence="collimated",
+            surface_index=surface_index,
+            radial_edges_m=edges,
+            obj=obj,
+        )
+
+    plain = trace(None)
+    profiles = []
+    for depth in np.atleast_1d(np.asarray(depths_m, dtype=float)):
+        buried = trace(
+            BuriedObject(
+                Box(
+                    lower=np.array([-half_width_m, -half_width_m, depth]),
+                    upper=np.array(
+                        [half_width_m, half_width_m, depth + thickness_m]
+                    ),
+                ),
+                extinction_coefficient=object_extinction,
+                single_scattering_albedo=object_albedo,
+                refractive_index=object_index,
+            )
+        )
+        profiles.append(
+            ContrastProfile(
+                rho_m=plain.bin_centres_m,
+                plain=plain.reflectance,
+                with_object=buried.reflectance,
+                mean_path_plain_m=plain.mean_path_m,
+                mean_path_object_m=buried.mean_path_m,
+                n_photons=config.n_photons,
+                penetration_depth_m=parameters.penetration_depth,
+                transport_mfp_m=parameters.transport_mean_free_path,
+                depth_m=float(depth),
+            )
+        )
+    return profiles
+
+
 def measure_contrast_profile(
     backend: Backend,
     single_scattering_albedo: float,
