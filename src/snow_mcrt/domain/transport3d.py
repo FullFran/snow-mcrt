@@ -147,6 +147,9 @@ class Transport3DResult:
         absorbed: Fraction deposited in the medium.
         truncated: Fraction still in flight when the step budget ran out.
         binned_weight: Escaped fraction per radial bin.
+        binned_path_weight: Escaped fraction times the optical path it
+            travelled, per radial bin. Divided by ``binned_weight`` this is
+            the mean path of the light returning at that separation.
         outside_bins: Escaped fraction falling outside the binned range.
             Reported rather than dropped, so a profile can never look complete
             when it is not.
@@ -160,6 +163,7 @@ class Transport3DResult:
     absorbed: float
     truncated: float
     binned_weight: np.ndarray
+    binned_path_weight: np.ndarray
     outside_bins: float
     edges_m: np.ndarray
     scatters: int
@@ -181,6 +185,44 @@ class Transport3DResult:
     def annulus_area_m2(self) -> np.ndarray:
         """Area of each annulus, m^2."""
         return np.pi * (self.edges_m[1:] ** 2 - self.edges_m[:-1] ** 2)
+
+    @property
+    def mean_path_m(self) -> np.ndarray:
+        """Mean optical path of the light returning at each separation, m.
+
+        The quantity time-of-flight instruments measure, and the reason they
+        exist: a photon that came back from deep took longer to do it, so
+        path length is a depth coordinate that survives even when the
+        steady-state intensity does not distinguish two snowpacks.
+
+        ``nan`` where no light arrived -- an empty bin has no mean.
+
+        **Delta scaling distorts this.** With ``delta_scaled=True`` the
+        forward peak is truncated and the medium re-scaled, which preserves
+        the diffusion limit but not path lengths: the scaled medium reaches
+        the same place in fewer, longer steps. Run with
+        ``TransportConfig(delta_scaled=False)`` for a time-resolved result
+        that means anything.
+        """
+        return np.divide(
+            self.binned_path_weight,
+            self.binned_weight,
+            out=np.full_like(self.binned_weight, np.nan),
+            where=self.binned_weight > 0,
+        )
+
+    def mean_time_ps(self, group_index: float | None = None) -> np.ndarray:
+        """Mean time of flight at each separation, picoseconds.
+
+        Args:
+            group_index: Index setting the speed of light in the medium.
+                Defaults to the surface index, which is the right choice for
+                a homogeneous snowpack and wrong the moment an object with a
+                different index carries a large share of the path.
+        """
+        n = self.surface_index if group_index is None else group_index
+        speed = 299_792_458.0 / n
+        return self.mean_path_m / speed * 1e12
 
     @property
     def reflectance(self) -> np.ndarray:
@@ -367,6 +409,9 @@ def run_transport_3d(
     generator = backend.rng(config.seed)
 
     position = xp.zeros((n, 3))
+    # Optical path travelled, metres. One scalar per photon and the only new
+    # state time-of-flight needs -- the loop already knows every step length.
+    path = xp.zeros(n)
     direction = _initial_directions(backend, generator, n, incidence)
     weight = xp.ones(n)
     alive = xp.ones(n, dtype=bool)
@@ -383,6 +428,10 @@ def run_transport_3d(
         index_in = obj.refractive_index
 
     binned = xp.zeros(n_bins)
+    # Weight times path, so the ratio is the weighted mean path of the light
+    # that came back at that separation. Accumulating the product rather than
+    # a running mean keeps it exact under Russian roulette reweighting.
+    binned_path = xp.zeros(n_bins)
     reflected = 0.0
     outside = 0.0
     absorbed = 0.0
@@ -442,6 +491,7 @@ def run_transport_3d(
         position = xp.where(
             alive[:, None], position + step[:, None] * direction, position
         )
+        path = xp.where(alive, path + step, path)
 
         if bool(backend.to_numpy(hits_surface.any())):
             cos_incident = -direction[:, 2]
@@ -467,9 +517,15 @@ def run_transport_3d(
             rho = xp.sqrt(position[:, 0] ** 2 + position[:, 1] ** 2)
             index = xp.searchsorted(edges_device, rho, side="right") - 1
             inside = escapes & (index >= 0) & (index < n_bins)
+            safe_index = xp.where(inside, index, 0)
             binned = binned + xp.bincount(
-                xp.where(inside, index, 0),
+                safe_index,
                 weights=xp.where(inside, escaped_weight, 0.0),
+                minlength=n_bins,
+            )[:n_bins]
+            binned_path = binned_path + xp.bincount(
+                safe_index,
+                weights=xp.where(inside, escaped_weight * path, 0.0),
                 minlength=n_bins,
             )[:n_bins]
             outside += float(
@@ -538,6 +594,7 @@ def run_transport_3d(
         absorbed=absorbed / n,
         truncated=truncated / n,
         binned_weight=backend.to_numpy(binned) / n,
+        binned_path_weight=backend.to_numpy(binned_path) / n,
         outside_bins=outside / n,
         edges_m=edges,
         scatters=scatters,
