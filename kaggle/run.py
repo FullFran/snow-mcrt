@@ -40,7 +40,11 @@ import time
 from pathlib import Path
 
 REPO = "github.com/FullFran/snow-mcrt.git"
-BRANCH = "main"
+# The 3-D engine and the diffusion comparison live on this branch until it
+# merges. Pointing at main would install a package that does not contain them
+# and fail with an import error rather than a wrong number, which is the
+# failure mode to prefer.
+BRANCH = "feat/transport-3d"
 OUTPUT = Path("/kaggle/working")
 CONSTANTS = OUTPUT / "warren_brandt_2008.dat"
 
@@ -171,6 +175,109 @@ def clean_snow_visible() -> dict:
     return {"clean_snow_visible": rows}
 
 
+def diffusion_validity() -> dict:
+    """How far diffusion theory departs from transport, at a reachable count.
+
+    Every figure in ``docs/detectability.md`` is a diffusion calculation. This
+    measures the approximation against the 3-D engine, which makes no closure
+    assumption at all.
+
+    The reason it belongs on a GPU rather than a laptop is the *tail*. The
+    profile falls seven orders of magnitude over the range that matters, so
+    the far bins are starved of photons long before the near ones are, and a
+    starved bin is not a small measurement -- it is no measurement. Clean snow
+    at 450 nm makes this acute: ``1 - omega`` is about 3e-7, so a photon takes
+    of order a million scattering orders to be absorbed, and locally the run
+    ends with several percent of the weight still in flight. ``truncated`` is
+    reported for exactly that reason.
+
+    Writes the profiles as CSV as well as the summary, because the ratio bin
+    by bin is the result; the worst-case number is only its headline.
+    """
+    import csv
+
+    import numpy as np
+
+    from snow_mcrt.adapters.cupy_backend import CupyBackend
+    from snow_mcrt.adapters.miepython_solver import MiepythonSolver
+    from snow_mcrt.adapters.tabulated_constants import TabulatedConstants
+    from snow_mcrt.application.validate_diffusion import compare_with_diffusion
+    from snow_mcrt.domain.medium import (
+        BLACK_CARBON,
+        ImpurityLoading,
+        SnowLayer,
+        compute_layer_properties,
+    )
+    from snow_mcrt.domain.transport import TransportConfig
+
+    constants = TabulatedConstants(
+        _constants_path(), name="Warren & Brandt 2008", wavelength_scale_to_nm=1000.0
+    ).load()
+    solver = MiepythonSolver()
+    backend = CupyBackend()
+
+    cases = (
+        ("clean-450nm", 450.0, 0.0),
+        ("arctic-450nm", 450.0, 10.0),
+        ("alpine-450nm", 450.0, 100.0),
+        ("alpine-800nm", 800.0, 100.0),
+    )
+
+    rows = []
+    for label, wavelength, ng_per_g in cases:
+        grid = np.array([wavelength])
+        impurities = (
+            (ImpurityLoading.from_ng_per_g(BLACK_CARBON, ng_per_g),)
+            if ng_per_g
+            else ()
+        )
+        props = compute_layer_properties(
+            solver,
+            SnowLayer(100e-6, 300.0, impurities=impurities),
+            constants.m_at(grid),
+            grid,
+        )
+        started = time.time()
+        comparison = compare_with_diffusion(
+            backend,
+            float(props.single_scattering_albedo[0]),
+            float(props.asymmetry[0]),
+            float(props.extinction_coefficient[0]),
+            config=TransportConfig(
+                n_photons=2_000_000, seed=7, max_scatters=400_000
+            ),
+        )
+        sampled = comparison.sampled()
+        path = OUTPUT / f"mc-diffusion-{label}.csv"
+        with path.open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            columns = comparison.columns()
+            writer.writerow(columns.keys())
+            for values in zip(*(np.asarray(v)[sampled] for v in columns.values())):
+                writer.writerow(f"{value:.10g}" for value in values)
+
+        row = {
+            "case": label,
+            "wavelength_nm": wavelength,
+            "black_carbon_ng_per_g": ng_per_g,
+            "co_albedo": 1.0 - comparison.single_scattering_albedo,
+            "asymmetry": comparison.asymmetry,
+            "transport_mfp_cm": comparison.transport_mfp_m * 100,
+            "penetration_depth_cm": comparison.penetration_depth_m * 100,
+            "reflected": comparison.reflected,
+            "truncated": comparison.truncated,
+            "worst_ratio_within_12_mfp": comparison.worst_ratio_within(12.0),
+            "ratio_far_tail": float(
+                np.nanmax(comparison.ratio[sampled])
+            ),
+            "bins_sampled": int(sampled.sum()),
+            "seconds": round(time.time() - started, 1),
+        }
+        rows.append(row)
+        print(json.dumps(row), flush=True)
+    return {"diffusion_validity": rows}
+
+
 def _constants_path() -> str:
     """The ice constants fetched alongside the install."""
     if not CONSTANTS.exists():
@@ -183,6 +290,7 @@ def main() -> int:
     manifest = {"environment": report_environment()}
     manifest.update(cross_check_backends())
     manifest.update(clean_snow_visible())
+    manifest.update(diffusion_validity())
     (OUTPUT / "gpu-validation.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"written to {OUTPUT / 'gpu-validation.json'}", flush=True)
     return 0
