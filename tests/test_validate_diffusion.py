@@ -137,11 +137,12 @@ class TestTheRatio:
         # orders of magnitude, not by tens of percent.
         assert comparison.worst_ratio_within(12.0) < 1.0
 
-    def test_transport_exceeds_diffusion_in_the_far_tail(self, backend):
-        # The direction is predictable in advance and is the physics worth
-        # asserting: diffusion assumes a near-isotropic photon density, and
-        # the far tail is carried by photons that travelled relatively
-        # straight, which it therefore underestimates.
+    def test_diffusion_overestimates_right_at_the_source(self, backend):
+        # Measured on a P100 at two million photons, the innermost bin comes
+        # back at 0.79 to 0.80 in all four snowpacks tested -- consistent to
+        # a percent across three orders of magnitude in co-albedo. Inside a
+        # few transport lengths the photon has not yet forgotten which way it
+        # was going, so diffusion is not inaccurate there, it is inapplicable.
         result = compare_with_diffusion(
             backend,
             OMEGA,
@@ -150,11 +151,30 @@ class TestTheRatio:
             config=TransportConfig(n_photons=200_000, seed=8, max_scatters=6000),
             n_bins=20,
         )
-        sampled = result.sampled()
-        near = result.ratio[sampled & (result.rho_in_mfp < 6)]
-        far = result.ratio[sampled & (result.rho_in_mfp > 15)]
-        assert far.size and near.size
-        assert far.mean() > near.mean()
+        innermost = result.ratio[result.sampled()][0]
+        assert innermost < 0.95
+
+    def test_the_useful_band_agrees_far_better_than_the_worst_case(
+        self, backend
+    ):
+        # The reason departure_between exists. A worst case taken over
+        # everything inside twelve transport lengths is dominated by the near
+        # field and lands near 20%; the band a source-detector pair actually
+        # uses is several times tighter. Reporting only the first would
+        # describe the premise failing rather than the approximation
+        # degrading.
+        result = compare_with_diffusion(
+            backend,
+            OMEGA,
+            G,
+            BETA,
+            config=TransportConfig(n_photons=200_000, seed=9, max_scatters=6000),
+            n_bins=20,
+        )
+        assert result.departure_between(3.0, 12.0) < result.worst_ratio_within(12.0)
+
+    def test_a_band_with_no_bins_in_it_is_not_invented(self, comparison):
+        assert np.isnan(comparison.departure_between(1e6, 1e7))
 
 
 class TestTheRunIsUsable:

@@ -6,11 +6,16 @@ of them had ever been checked against a transport solution. This script closes
 that: it runs the 3-D Monte Carlo over the snowpacks those figures describe and
 writes the ratio ``R_MC(rho) / R_diffusion(rho)`` bin by bin.
 
-The output is a validity range rather than a verdict. Diffusion is expected to
-work a few transport mean free paths out from the source and to underestimate
-the far tail, where the surviving photons are those that travelled relatively
-straight and the near-isotropic assumption is worst. Publishing the size of
-that departure is more useful than publishing a pass.
+The output is a validity range rather than a verdict, and the range has
+structure: measured at two million photons on a GPU, the ratio dips below one
+at the source, crosses one between three and seven transport mean free paths,
+peaks around 1.03, and settles near 0.93 further out. It is not monotonic, and
+a single worst-case number hides that.
+
+Clean snow in the visible cannot be converged on a CPU -- ``1 - omega`` is
+about 3e-7, so a photon needs of order a million scattering orders. This
+script reports ``trunc`` for exactly that reason; the converged versions of
+these cases live in ``results/kaggle/``.
 
 Headless, like every run script here: it computes and writes, and draws
 nothing.
@@ -104,7 +109,7 @@ def main() -> int:
     print(f"{args.photons} photons per case, seed {args.seed}")
     print()
     print(f"  {'case':>14} {'mfp(cm)':>9} {'delta(cm)':>10} {'R':>7}"
-          f" {'worst<12mfp':>12} {'trunc':>9}")
+          f" {'3-12mfp':>9} {'<12mfp':>8} {'trunc':>9}")
 
     with ExitStack() as stack:
         solver = MiepythonSolver()
@@ -142,16 +147,22 @@ def main() -> int:
                 f"  {label:>14} {comparison.transport_mfp_m * 100:9.3f}"
                 f" {comparison.penetration_depth_m * 100:10.2f}"
                 f" {comparison.reflected:7.4f}"
-                f" {comparison.worst_ratio_within(12.0):12.1%}"
+                f" {comparison.departure_between(3.0, 12.0):9.1%}"
+                f" {comparison.worst_ratio_within(12.0):8.1%}"
                 f" {comparison.truncated:9.1e}"
             )
 
     print()
-    print("'worst<12mfp' is the largest departure from unity within twelve")
-    print("transport mean free paths of the source -- the range the")
-    print("detectability figures actually use. Beyond it the Monte Carlo runs")
-    print("above diffusion and the gap widens, which is the expected")
-    print("direction: diffusion underestimates the straight-path tail.")
+    print("'3-12mfp' is the largest departure from unity in the band a")
+    print("source-detector pair actually uses. '<12mfp' includes the near")
+    print("field as well and is several times larger -- but inside about")
+    print("three transport mean free paths diffusion is not inaccurate, it")
+    print("is inapplicable, so that column describes its premise failing")
+    print("rather than the approximation degrading. Quote the first.")
+    print()
+    print("A large 'trunc' means the tail is unconverged, not that it is")
+    print("small. Clean snow in the visible cannot be converged on a CPU:")
+    print("see results/kaggle/ for the same cases at two million photons.")
     print()
     print(f"written to {args.output}")
     return 0
