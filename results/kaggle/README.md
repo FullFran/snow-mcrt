@@ -30,15 +30,25 @@ estimator has more to work with.
 
 | `omega` | NumPy | CuPy | speedup |
 | ------- | ----- | ---- | ------- |
-| 0.50 | 0.33 s | 4.43 s | **0.07x** |
-| 0.90 | 1.24 s | 0.19 s | 6.5x |
-| 0.95 | 2.74 s | 0.37 s | 7.4x |
+| 0.50 | 0.31 s | 3.68 s | **0.08x** |
+| 0.90 | 1.26 s | 0.21 s | 6.0x |
+| 0.95 | 2.94 s | 0.36 s | 8.2x |
 
 At `omega = 0.5` the transport finishes in about two dozen scattering orders
-and kernel launch overhead dominates completely — the GPU is thirteen times
+and kernel launch overhead dominates completely — the GPU is twelve times
 *slower*. This is worth stating plainly because it is the same conclusion the
 architecture notes reached from the other direction: the GPU pays in deep
 transport, not in anything that merely fits in an array.
+
+These timings are from the run that also produced the diffusion section below,
+and they replace an earlier run's — 0.07x, 6.5x, 7.4x. The spread between the
+two is up to 20%, which is what a shared Kaggle GPU does to a wall clock.
+
+The *physics* did not move at all. Every Monte Carlo value in the next table
+is bit-identical across the two runs, because the seed is part of the
+configuration and the transport is deterministic given it. Timing is the one
+thing here that is not reproducible, and separating the two is the reason both
+are reported.
 
 ## Deep transport, 500 000 photons
 

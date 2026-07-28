@@ -80,6 +80,21 @@ tests assert the two cases separately.
 
 ## Results
 
+**Which solver produced which curve**, because the name of the repository
+makes one guess and it is the wrong one. The spectral albedo curves below are
+**analytic** — van de Hulst with similarity scaling, accurate to about 1% and
+fast enough to sweep hundreds of wavelengths in a second. The **Monte Carlo**
+engine is the reference that validates them, not the thing that draws them: it
+spot-checks the analytic curve at a handful of wavelengths, and it produced the
+diffusion validity range further down. Sweeping a visible curve with it is not
+a slow run but an infeasible one — clean snow at 450 nm needs of order three
+million scattering orders per photon.
+
+Both are validated: the analytic solver against TARTES to 0.0023, the Monte
+Carlo against van de Hulst in one dimension and against the plane-parallel
+engine in three. Which one drew a given figure is recorded in its manifest
+under `data/reference/`.
+
 ### Impurities
 
 ![Black carbon in snow](docs/figures/black-carbon.png)
@@ -186,12 +201,12 @@ The timing is worth stating honestly, because it is not a straight win:
 
 | `omega` | NumPy | CuPy | speedup |
 | ------- | ----- | ---- | ------- |
-| 0.50 | 0.33 s | 4.43 s | **0.07x** |
-| 0.90 | 1.24 s | 0.19 s | 6.5x |
-| 0.95 | 2.74 s | 0.37 s | 7.4x |
+| 0.50 | 0.31 s | 3.68 s | **0.08x** |
+| 0.90 | 1.26 s | 0.21 s | 6.0x |
+| 0.95 | 2.94 s | 0.36 s | 8.2x |
 
 At `omega = 0.5` the transport finishes in two dozen scattering orders and
-kernel launch overhead dominates completely — the GPU is thirteen times
+kernel launch overhead dominates completely — the GPU is twelve times
 *slower*. It pays in deep transport and nowhere else, which is the same
 conclusion the architecture reached from the other direction.
 
@@ -200,6 +215,21 @@ Deep transport at 500 000 photons reproduces the analytic solution to 0.02%,
 `1/(1 - omega)` cost law comes out measured rather than asserted: a factor of
 37 in co-albedo buys 33 times the scattering orders and 32 times the wall
 clock.
+
+Those Monte Carlo values are bit-identical across two separate GPU runs, since
+the seed is part of the configuration. The *timings* moved by up to 20% — a
+shared GPU is the one thing here that does not reproduce, which is why the two
+are reported separately.
+
+### Where the diffusion approximation holds
+
+The buried-object work rests on diffusion theory, and until the 3-D engine
+existed there was nothing to check it against. Measured at two million photons
+per case over four snowpacks spanning three decades of co-albedo, **diffusion
+is good to 9–11% over 3–12 transport mean free paths** and 5–9% out to 50.
+Inside about three it is not inaccurate but inapplicable — the photon has not
+yet forgotten which way it was going. Details in
+[`docs/detectability.md`](docs/detectability.md).
 
 ```bash
 kaggle kernels push -p kaggle
@@ -210,7 +240,7 @@ kaggle kernels output fran17/snow-mcrt-gpu-validation -p results/kaggle
 
 ```bash
 uv venv && uv pip install -e '.[dev]'
-pytest                                    # 241 passed, 4 skipped without CUDA
+pytest                                    # 348 passed, 4 skipped without CUDA
 
 python scripts/run_albedo.py --output data/reference     # compute, draw nothing
 python scripts/plot_albedo.py --output docs/figures      # draw, compute nothing
