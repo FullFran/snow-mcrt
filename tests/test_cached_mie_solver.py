@@ -9,10 +9,16 @@ the same input". A stub makes both observable; the real solver makes neither.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
-from snow_mcrt.adapters.cached_mie_solver import CachedMieSolver, default_cache_dir
+from snow_mcrt.adapters.cached_mie_solver import (
+    CachedMieSolver,
+    default_cache_dir,
+    frozen_table_paths,
+)
 from snow_mcrt.adapters.miepython_solver import MiepythonSolver
 from snow_mcrt.ports.mie_solver import MieSolver
 
@@ -28,6 +34,7 @@ class CountingSolver:
     """
 
     name = "counting"
+    version = "0.0.0"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -232,7 +239,8 @@ class TestItSurvivesTheProcess:
         solver = CachedMieSolver(inner, cache_dir=tmp_path)
         solver.cache_path.parent.mkdir(parents=True, exist_ok=True)
         solver.cache_path.write_bytes(b"not an npz")
-        q_ext, _, _ = solver.efficiencies(ICE_M_VISIBLE, 1.0)
+        with pytest.warns(UserWarning, match="unreadable"):
+            q_ext, _, _ = solver.efficiencies(ICE_M_VISIBLE, 1.0)
         assert np.isfinite(q_ext).all()
 
     def test_clear_forgets_both_memory_and_disk(self, inner, tmp_path):
@@ -265,6 +273,175 @@ class TestItDelegatesWhatItDoesNotCache:
         with pytest.raises(ValueError):
             cached.efficiencies(ICE_M_VISIBLE, -1.0)
         assert len(cached) == 0
+
+
+class TestProvenanceIsPartOfTheTable:
+    """A table with no record of what produced it is a table that cannot be
+    committed. The bit-exact key makes this sharper than usual: without a
+    stamp, a reader running a different solver version gets a *hit* and walks
+    away with someone else's numbers believing they are their own."""
+
+    def test_the_stamp_is_written_alongside_the_numbers(self, solver):
+        solver.efficiencies(ICE_M_VISIBLE, 1.0)
+        solver.save()
+        with np.load(solver.cache_path) as data:
+            stamp = json.loads(str(data["provenance"]))
+        assert stamp["solver"] == "counting"
+        assert stamp["solver_version"] == "0.0.0"
+        assert stamp["numpy"] == np.__version__
+
+    def test_a_table_from_another_solver_version_is_not_used(
+        self, inner, tmp_path
+    ):
+        first = CachedMieSolver(inner, cache_dir=tmp_path)
+        first.efficiencies(ICE_M_VISIBLE, 1.0)
+        first.save()
+
+        upgraded = CountingSolver()
+        upgraded.version = "9.9.9"
+        second = CachedMieSolver(upgraded, cache_dir=tmp_path)
+        with pytest.warns(UserWarning, match="provenance"):
+            second.efficiencies(ICE_M_VISIBLE, 1.0)
+        assert upgraded.calls == 1
+
+    def test_a_table_from_another_numpy_is_not_used(
+        self, inner, tmp_path, monkeypatch
+    ):
+        first = CachedMieSolver(inner, cache_dir=tmp_path)
+        first.efficiencies(ICE_M_VISIBLE, 1.0)
+        first.save()
+
+        monkeypatch.setattr(np, "__version__", "0.0.0-not-a-real-numpy")
+        second_inner = CountingSolver()
+        second = CachedMieSolver(second_inner, cache_dir=tmp_path)
+        with pytest.warns(UserWarning):
+            second.efficiencies(ICE_M_VISIBLE, 1.0)
+        assert second_inner.calls == 1
+
+    def test_a_table_with_no_stamp_at_all_is_not_used(self, inner, tmp_path):
+        path = CachedMieSolver(inner, cache_dir=tmp_path).cache_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            path,
+            m_real=np.array([1.31]),
+            m_imag=np.array([0.0]),
+            x=np.array([1.0]),
+            q_ext=np.array([1.0]),
+            q_sca=np.array([1.0]),
+            g=np.array([0.0]),
+        )
+        solver = CachedMieSolver(inner, cache_dir=tmp_path)
+        with pytest.warns(UserWarning):
+            solver.efficiencies(1.31 + 0j, 1.0)
+        assert inner.calls == 1
+
+    def test_a_matching_stamp_is_silent(self, inner, tmp_path, recwarn):
+        first = CachedMieSolver(inner, cache_dir=tmp_path)
+        first.efficiencies(ICE_M_VISIBLE, 1.0)
+        first.save()
+        CachedMieSolver(CountingSolver(), cache_dir=tmp_path).efficiencies(
+            ICE_M_VISIBLE, 1.0
+        )
+        assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []
+
+
+class TestTheFrozenTable:
+    """The committed table and the working cache do different jobs. One is a
+    reproducibility artifact, regenerated deliberately; the other is scratch
+    space that grows on its own. Conflating them puts a churning binary blob
+    in git history."""
+
+    @pytest.fixture
+    def frozen(self, tmp_path):
+        source = CachedMieSolver(CountingSolver(), cache_dir=tmp_path / "build")
+        source.efficiencies(ICE_M_VISIBLE, np.array([1.0, 2.0, 3.0]))
+        source.save()
+        return source.cache_path
+
+    def test_is_read(self, frozen, inner, tmp_path):
+        solver = CachedMieSolver(
+            inner, cache_dir=tmp_path / "local", frozen_paths=[frozen]
+        )
+        solver.efficiencies(ICE_M_VISIBLE, np.array([1.0, 2.0]))
+        assert inner.calls == 0
+
+    def test_is_never_written_to(self, frozen, inner, tmp_path):
+        before = frozen.read_bytes()
+        with CachedMieSolver(
+            inner, cache_dir=tmp_path / "local", frozen_paths=[frozen]
+        ) as solver:
+            solver.efficiencies(ICE_M_VISIBLE, 99.0)
+        assert frozen.read_bytes() == before
+
+    def test_only_the_new_points_land_in_the_local_cache(
+        self, frozen, inner, tmp_path
+    ):
+        # Copying the frozen table into the local one would duplicate a
+        # committed artifact on every machine for no gain.
+        local = tmp_path / "local"
+        with CachedMieSolver(
+            inner, cache_dir=local, frozen_paths=[frozen]
+        ) as solver:
+            solver.efficiencies(ICE_M_VISIBLE, np.array([1.0, 2.0, 99.0]))
+            local_path = solver.cache_path
+        with np.load(local_path) as data:
+            assert data["x"].tolist() == [99.0]
+
+    def test_a_frozen_hit_still_counts_as_a_hit(self, frozen, inner, tmp_path):
+        solver = CachedMieSolver(
+            inner, cache_dir=tmp_path / "local", frozen_paths=[frozen]
+        )
+        solver.efficiencies(ICE_M_VISIBLE, np.array([1.0, 99.0]))
+        assert (solver.hits, solver.misses) == (1, 1)
+
+    def test_a_missing_frozen_table_is_harmless(self, inner, tmp_path):
+        solver = CachedMieSolver(
+            inner,
+            cache_dir=tmp_path / "local",
+            frozen_paths=[tmp_path / "nope.npz"],
+        )
+        q_ext, _, _ = solver.efficiencies(ICE_M_VISIBLE, 1.0)
+        assert np.isfinite(q_ext).all()
+
+    def test_a_frozen_table_from_another_version_is_refused_loudly(
+        self, frozen, tmp_path
+    ):
+        # Silence here would look exactly like "the committed table did not
+        # cover your grid", which is a different and much less interesting
+        # problem.
+        upgraded = CountingSolver()
+        upgraded.version = "9.9.9"
+        solver = CachedMieSolver(
+            upgraded, cache_dir=tmp_path / "local", frozen_paths=[frozen]
+        )
+        with pytest.warns(UserWarning, match="provenance"):
+            solver.efficiencies(ICE_M_VISIBLE, 1.0)
+        assert upgraded.calls == 1
+
+    def test_the_local_cache_wins_over_the_frozen_one(
+        self, frozen, inner, tmp_path
+    ):
+        local = tmp_path / "local"
+        seeded = CachedMieSolver(CountingSolver(), cache_dir=local)
+        seeded.efficiencies(ICE_M_VISIBLE, 1.0)
+        seeded.save()
+        solver = CachedMieSolver(inner, cache_dir=local, frozen_paths=[frozen])
+        assert solver.efficiencies(ICE_M_VISIBLE, 1.0)[0].size == 1
+        assert inner.calls == 0
+
+
+class TestWhereTheFrozenTableLives:
+    def test_finds_a_committed_table_for_the_solver(self, tmp_path):
+        path = tmp_path / "mie-efficiencies-miepython-v2.npz"
+        path.write_bytes(b"")
+        assert frozen_table_paths(MiepythonSolver(), tmp_path) == [path]
+
+    def test_an_absent_directory_yields_nothing(self, tmp_path):
+        assert frozen_table_paths(MiepythonSolver(), tmp_path / "gone") == []
+
+    def test_ignores_a_table_built_for_a_different_solver(self, tmp_path):
+        (tmp_path / "mie-efficiencies-counting-v2.npz").write_bytes(b"")
+        assert frozen_table_paths(MiepythonSolver(), tmp_path) == []
 
 
 class TestTheDefaultLocation:

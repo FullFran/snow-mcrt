@@ -30,6 +30,14 @@ class MieSolver(Protocol):
 
     name: str
 
+    # Which release produced the numbers. Part of the port rather than a
+    # detail of one adapter, because results computed here are committed and
+    # cross-checked against published tables: a number nobody can attribute to
+    # a specific implementation is not evidence. It is also what lets a cached
+    # table be refused when the solver underneath it has moved -- see
+    # :class:`~snow_mcrt.adapters.cached_mie_solver.CachedMieSolver`.
+    version: str
+
     def efficiencies(self, m: Any, x: Any) -> tuple[Any, Any, Any]:
         """Return ``(q_ext, q_sca, g)`` for relative index ``m``, size ``x``.
 

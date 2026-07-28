@@ -7,7 +7,12 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
-    "miepython>=3.0",
+    # Pinned exactly, not floated. The Mie table under data/mie/ is a committed
+    # artifact carrying the solver version that produced it, and readers refuse
+    # a table whose stamp does not match. A floating range would mean the
+    # committed numbers are attributable to "some 3.x", which is not an
+    # attribution -- and it would silently stop the table from ever being used.
+    "miepython==3.2.0",
 ]
 
 [project.optional-dependencies]

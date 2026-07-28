@@ -21,6 +21,7 @@ class MiepythonSolver:
     """Adapter over ``miepython.efficiencies_mx``."""
 
     name = "miepython"
+    version = getattr(miepython, "__version__", "unknown")
 
     def efficiencies(
         self, m: np.ndarray | complex, x: np.ndarray | float
