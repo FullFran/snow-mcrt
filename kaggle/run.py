@@ -40,11 +40,7 @@ import time
 from pathlib import Path
 
 REPO = "github.com/FullFran/snow-mcrt.git"
-# The 3-D engine and the diffusion comparison live on this branch until it
-# merges. Pointing at main would install a package that does not contain them
-# and fail with an import error rather than a wrong number, which is the
-# failure mode to prefer.
-BRANCH = "feat/transport-3d"
+BRANCH = "main"
 OUTPUT = Path("/kaggle/working")
 CONSTANTS = OUTPUT / "warren_brandt_2008.dat"
 
