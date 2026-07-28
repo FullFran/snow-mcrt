@@ -113,6 +113,33 @@ at each escape, and the two agree to 0.07% (asserted in `tests/test_fresnel.py`)
 And both must see the same **source**, so the engine runs a collimated pencil
 beam to match the Green's function.
 
+### The band is reproducible on a laptop; the reflectance is not
+
+Worth separating, because the two have different budgets.
+
+`data/validation/mc-diffusion-*.csv` holds the same four cases at 120 000
+photons — about twenty minutes on one core. Against the GPU runs at two
+million:
+
+| case | band, CPU | band, GPU | reflected, CPU | reflected, GPU |
+| ---- | --------- | --------- | -------------- | -------------- |
+| clean, 450 nm | 8.8% | 9.0% | 0.9548 | **0.9915** |
+| Arctic, 450 nm | 8.2% | 9.3% | 0.9463 | **0.9633** |
+| alpine, 450 nm | 11.4% | 10.6% | 0.8905 | 0.8912 |
+| alpine, 800 nm | 11.4% | 10.9% | 0.7954 | 0.7950 |
+
+The band agrees to **1.1 points** while the total reflectance is off by **3.7**
+on clean snow. That is not luck. Truncating a run discards the photons with
+the longest paths, and those are the ones populating the far tail and the
+total; the intermediate field is made of photons that left long before the
+budget ran out.
+
+So a laptop can measure *where diffusion holds*, which is what this note needs.
+It cannot measure *how much light comes back* from clean snow in the visible —
+nothing on a CPU can, and a run that reports 0.9548 for a quantity that is
+0.9915 does not announce itself. Only the `truncated` column distinguishes it
+from a converged answer.
+
 ## The figures
 
 ![What limits penetration](figures/detect-penetration.png)

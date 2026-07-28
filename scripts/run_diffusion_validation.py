@@ -88,8 +88,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("data/validation"))
     parser.add_argument("--constants", type=Path, default=DEFAULT_CONSTANTS)
-    parser.add_argument("--photons", type=int, default=400_000)
-    parser.add_argument("--max-scatters", type=int, default=40_000)
+    # Defaults sized for one CPU core: about five minutes a case, twenty for
+    # the sweep. Raising them does not make the useful band better -- see the
+    # note below -- it makes the total reflectance and the tail better, and
+    # for clean visible snow no CPU budget is enough. That run lives on a GPU.
+    parser.add_argument("--photons", type=int, default=120_000)
+    parser.add_argument("--max-scatters", type=int, default=6_000)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument(
         "--no-cache",
@@ -163,6 +167,14 @@ def main() -> int:
     print("A large 'trunc' means the tail is unconverged, not that it is")
     print("small. Clean snow in the visible cannot be converged on a CPU:")
     print("see results/kaggle/ for the same cases at two million photons.")
+    print()
+    print("The band survives that, though, and the reason is worth knowing.")
+    print("Truncation discards long-path photons, and those populate the far")
+    print("tail rather than the intermediate field. Against the GPU runs at")
+    print("two million photons the 3-12mfp band agrees to 1.1 points even")
+    print("where the total reflectance is off by 3.7. So a laptop can measure")
+    print("where diffusion holds; it cannot measure how much light comes")
+    print("back from clean snow in the visible.")
     print()
     print(f"written to {args.output}")
     return 0
