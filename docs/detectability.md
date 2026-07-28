@@ -58,6 +58,61 @@ Diffusion theory is more reliable here, not less, which means the analytic
 machinery transfers with the approximations in better shape than the people
 who developed them enjoyed.
 
+That was an argument. Below it is a measurement.
+
+## Where diffusion holds
+
+Every figure in this note is a diffusion calculation, so the first question a
+reader should ask is how wrong diffusion is. Until the 3-D engine existed there
+was no way to answer; now there is, because transport makes no closure
+assumption at all and can simply be run.
+
+Measured on a Tesla P100 at **two million photons per case**, over four
+snowpacks spanning three orders of magnitude in co-albedo
+([`results/kaggle/`](../results/kaggle/)):
+
+| case | `1 - omega` | `delta` | 3–12 `mfp'` | all `< 12 mfp'` | 12–50 `mfp'` |
+| ---- | ----------- | ------- | ----------- | --------------- | ------------ |
+| clean, 450 nm | 3.3e-07 | 91.3 cm | **9.0%** | 19.9% | 8.6% |
+| Arctic, 450 nm | 7.9e-06 | 18.5 cm | **9.3%** | 20.1% | 8.4% |
+| alpine, 450 nm | 7.6e-05 | 6.0 cm | **10.6%** | 20.5% | 7.0% |
+| alpine, 800 nm | 3.0e-04 | 3.0 cm | **10.9%** | 21.0% | 5.3% |
+
+Each entry is the largest departure of `R_MC(rho) / R_diffusion(rho)` from one
+inside that band.
+
+**Read the first column, not the second.** Inside about three transport mean
+free paths diffusion is not a poor approximation, it is an inapplicable one:
+the photon has not yet forgotten which way it was going, which is the entire
+premise. The innermost bin comes back at 0.79–0.80 in all four cases — the
+premise failing, not the approximation degrading. A worst case taken over
+everything closer than 12 `mfp'` is dominated by that region and doubles the
+apparent error.
+
+So: **diffusion is good to about 10% over the separations a source-detector
+pair actually uses, and to 5–9% from 12 to 50 transport mean free paths.**
+Every depth and contrast in this note inherits that.
+
+The shape is worth stating because it is not the obvious one. The ratio dips
+below one at the source, crosses one between three and seven `mfp'`, peaks
+near 1.03, and settles around 0.93 further out. It is **not monotonic**, and
+an earlier reading of a narrower range suggested it was — diffusion does not
+simply degrade with distance, it errs in one direction near the source and the
+other beyond.
+
+Beyond about 50 `mfp'` the comparison stops being a measurement of diffusion
+and starts being a measurement of photon budget. The profile falls seven
+orders of magnitude, so the far bins starve long before the near ones; one
+clean-snow bin came back at 0.085 on two million photons. Those bins are
+reported and not interpreted.
+
+Two things had to line up before any of this meant anything. Both solvers must
+see the same **surface** — diffusion carries the index mismatch as an
+effective internal reflection coefficient and the engine carries it as Fresnel
+at each escape, and the two agree to 0.07% (asserted in `tests/test_fresnel.py`).
+And both must see the same **source**, so the engine runs a collimated pencil
+beam to match the Green's function.
+
 ## The figures
 
 ![What limits penetration](figures/detect-penetration.png)

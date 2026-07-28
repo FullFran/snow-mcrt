@@ -19,10 +19,35 @@ each escape; the two agree to 0.07% and that agreement is asserted in
 Green's function is a pencil beam, so the Monte Carlo runs collimated.
 
 What comes out is not a pass or a fail. It is a range of validity, which is
-the useful thing to publish: diffusion is expected to hold a few transport
-mean free paths out from the source and to *underestimate* the far tail, where
-the surviving photons are the ones that travelled relatively straight and the
-near-isotropic assumption is worst.
+the useful thing to publish.
+
+**Measured on a Tesla P100 at two million photons**, across four snowpacks
+spanning three orders of magnitude in co-albedo, the ratio has the same shape
+every time and it is *not* monotonic:
+
+===================  ==========================  ============================
+band                 ``R_MC / R_diffusion``      reading
+===================  ==========================  ============================
+below 3 ``mfp'``     0.79 to 1.10                diffusion overestimates
+3 to 12 ``mfp'``     0.96 to 1.11, median ~1.03  best agreement
+12 to 50 ``mfp'``    0.91 to 0.97, median 0.93   diffusion overestimates ~7%
+beyond 50 ``mfp'``   case-dependent              tail, and photon-starved
+===================  ==========================  ============================
+
+Two things follow, and the second is a trap.
+
+Inside about three transport mean free paths diffusion is not inaccurate, it
+is *inapplicable*: the photon has not yet forgotten which way it was going,
+which is the entire premise. Quoting a worst case that includes that region
+describes the premise failing rather than the approximation degrading, so
+:meth:`DiffusionComparison.departure_between` exists to quote a band and
+:meth:`worst_ratio_within` should never be reported on its own.
+
+An empty bin is excluded by :meth:`DiffusionComparison.sampled`, but a bin
+holding two photons is not empty and is not a measurement either. The far
+tail runs out of photons long before it runs out of bins -- one clean-snow
+bin came back at 0.085 -- so the tail is quoted as a range and never as a
+number.
 """
 
 from __future__ import annotations
@@ -101,11 +126,34 @@ class DiffusionComparison:
         return (self.monte_carlo > 0) & np.isfinite(self.ratio)
 
     def worst_ratio_within(self, max_mfp: float) -> float:
-        """Largest departure from one inside ``max_mfp`` transport lengths."""
+        """Largest departure from one inside ``max_mfp`` transport lengths.
+
+        Reported for completeness and misleading on its own: it is dominated
+        by the bins nearest the source, where diffusion is not a poor
+        approximation but an inapplicable one. Pair it with
+        :meth:`departure_between`.
+        """
         inside = self.sampled() & (self.rho_in_mfp <= max_mfp)
         if not inside.any():
             return float("nan")
         return float(np.max(np.abs(self.ratio[inside] - 1.0)))
+
+    def departure_between(self, low_mfp: float, high_mfp: float) -> float:
+        """Largest departure from one in a band, in transport mean free paths.
+
+        The honest way to quote this comparison. ``departure_between(3, 12)``
+        covers the range a source-detector measurement actually uses and
+        excludes the near field, where the premise of diffusion theory has not
+        been met rather than merely strained.
+        """
+        band = (
+            self.sampled()
+            & (self.rho_in_mfp >= low_mfp)
+            & (self.rho_in_mfp <= high_mfp)
+        )
+        if not band.any():
+            return float("nan")
+        return float(np.max(np.abs(self.ratio[band] - 1.0)))
 
     def columns(self) -> dict[str, np.ndarray]:
         """Column name to values, in the order they are written to CSV."""

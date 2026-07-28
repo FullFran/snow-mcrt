@@ -266,6 +266,11 @@ def diffusion_validity() -> dict:
             "penetration_depth_cm": comparison.penetration_depth_m * 100,
             "reflected": comparison.reflected,
             "truncated": comparison.truncated,
+            # The band a source-detector pair actually uses. Reported first
+            # because the worst case inside 12 mfp' is dominated by the near
+            # field, where diffusion is inapplicable rather than inaccurate.
+            "departure_3_to_12_mfp": comparison.departure_between(3.0, 12.0),
+            "departure_12_to_50_mfp": comparison.departure_between(12.0, 50.0),
             "worst_ratio_within_12_mfp": comparison.worst_ratio_within(12.0),
             "ratio_far_tail": float(
                 np.nanmax(comparison.ratio[sampled])
