@@ -25,9 +25,26 @@ believed?** That question comes first, because the buried-object idea is
 worthless without it. An engine that cannot reproduce a published albedo curve
 has no business predicting what is under the surface.
 
-This repository is the answer to the first question. The second one is scoped
-in [`docs/detectability.md`](docs/detectability.md), and the engine already has
-something surprising to say about it.
+This repository is the answer to the first question. And the second one is no
+longer only scoped: there is now a 3-D engine with a real Fresnel surface and
+objects buried in the snow, so it has a measured answer.
+
+![Detection contrast against burial depth](docs/figures/detect-transport-depth.png)
+
+A 20 cm slab removes **53%** of the returned light when its top sits a tenth
+of a penetration depth down, 8.5% at six tenths, and 2.4% at one — a fall of
+roughly a factor of six per penetration depth, which is the two-way
+attenuation the design note argued for, now measured instead of assumed.
+
+The surprise is the lower curve. **A cavity absorbs nothing at all and still
+removes a third as much light as a black slab.** Inside a void there is nothing
+to scatter from, so a photon that enters runs straight to the far wall well
+below the depth anything returns from: a light pipe pointing away from the
+detector.
+
+The shaded band is where the answer stops being physics and becomes photon
+budget. It falls as `1/sqrt(N)`, which is why the deep cases run on a GPU.
+Full reasoning in [`docs/detectability.md`](docs/detectability.md).
 
 ## Light in snow, from first principles
 
@@ -223,13 +240,20 @@ are reported separately.
 
 ### Where the diffusion approximation holds
 
+![Where diffusion holds](docs/figures/detect-diffusion-validity.png)
+
 The buried-object work rests on diffusion theory, and until the 3-D engine
 existed there was nothing to check it against. Measured at two million photons
 per case over four snowpacks spanning three decades of co-albedo, **diffusion
 is good to 9–11% over 3–12 transport mean free paths** and 5–9% out to 50.
 Inside about three it is not inaccurate but inapplicable — the photon has not
-yet forgotten which way it was going. Details in
-[`docs/detectability.md`](docs/detectability.md).
+yet forgotten which way it was going.
+
+The shape is not the obvious one. The ratio dips below one at the source,
+crosses it around 3–7 `mfp'`, peaks near 1.03, and settles about 7% low
+further out: diffusion errs in one direction near the source and the other
+beyond. Beyond 50 `mfp'` the curves are drawn dotted because there the
+comparison measures photon budget rather than diffusion.
 
 ```bash
 kaggle kernels push -p kaggle
@@ -240,7 +264,7 @@ kaggle kernels output fran17/snow-mcrt-gpu-validation -p results/kaggle
 
 ```bash
 uv venv && uv pip install -e '.[dev]'
-pytest                                    # 348 passed, 4 skipped without CUDA
+pytest                                    # 371 passed, 4 skipped without CUDA
 
 python scripts/run_albedo.py --output data/reference     # compute, draw nothing
 python scripts/plot_albedo.py --output docs/figures      # draw, compute nothing

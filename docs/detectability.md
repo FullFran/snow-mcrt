@@ -11,17 +11,24 @@ every figure and every number below is produced by code under test rather than
 by arithmetic in a margin.
 
 **Three-dimensional transport now exists**, in `snow_mcrt.domain.transport3d`,
-with a real Fresnel surface at `n = 1.31`. That matters here for one reason:
-diffusion theory is an *approximation*, and until there was a transport
+with a real Fresnel surface at `n = 1.31`, ray-box intersection in
+`snow_mcrt.domain.geometry`, and objects that carry their own extinction,
+albedo and refractive index. Two things follow.
+
+Diffusion theory is an *approximation*, and until there was a transport
 solution to compare it against, none of the numbers in this note had a stated
 accuracy. They do now — see [Where diffusion holds](#where-diffusion-holds),
-and read every figure below through it.
+and read every figure below through it. The engine was deliberately validated
+against its one available oracle *before* geometry was added, so that a later
+disagreement can be blamed on the geometry rather than argued about.
 
-What still does *not* exist: ray-object intersection, detectors, or any object
-in any snowpack. Those are scoped at the end. The engine was deliberately
-validated against its one available oracle before geometry was added to it, so
-that a later disagreement can be blamed on the geometry rather than argued
-about.
+And the central question of this note — how fast an object stops being visible
+with depth — has been answered by tracing photons rather than by argument. See
+[How fast detection actually fades](#how-fast-detection-actually-fades).
+
+What still does *not* exist: detectors with a real aperture and acceptance
+angle, non-spherical grains, layered snowpacks, and any object that is not an
+axis-aligned box. Those are scoped at the end.
 
 **Updated with the real dataset.** An earlier version of this note used
 order-of-magnitude placeholders for the ice absorption. Warren & Brandt (2008)
@@ -66,6 +73,8 @@ Every figure in this note is a diffusion calculation, so the first question a
 reader should ask is how wrong diffusion is. Until the 3-D engine existed there
 was no way to answer; now there is, because transport makes no closure
 assumption at all and can simply be run.
+
+![Where diffusion holds](figures/detect-diffusion-validity.png)
 
 Measured on a Tesla P100 at **two million photons per case**, over four
 snowpacks spanning three orders of magnitude in co-albedo
@@ -139,6 +148,45 @@ It cannot measure *how much light comes back* from clean snow in the visible —
 nothing on a CPU can, and a run that reports 0.9548 for a quantity that is
 0.9915 does not announce itself. Only the `truncated` column distinguishes it
 from a converged answer.
+
+## How fast detection actually fades
+
+![Detection contrast against burial depth](figures/detect-transport-depth.png)
+
+Every depth number further down this note comes from diffusion theory and a
+two-way attenuation argument. This one comes from tracing photons past an
+object that is actually there.
+
+A 20 cm slab, buried at a series of depths, in snow whose penetration depth is
+6 cm. Depth is in units of `delta` so the curve transfers; contrast is the
+fractional change in returned light, which is what an instrument measures
+against an unknown source brightness.
+
+| depth | black slab | void |
+| ----- | ---------- | ---- |
+| 0.1 δ | **−52.9%** | −17.6% |
+| 0.6 δ | −8.5% | −3.8% |
+| 1.1 δ | −2.4% | −1.4% |
+| 1.6 δ | −0.7% | −0.4% |
+
+Three things worth taking from it.
+
+**The fall is steep — roughly a factor of six per penetration depth.** That is
+the two-way attenuation the note argues for, now measured rather than assumed:
+light has to reach the object and come back, so the signal goes as `exp(-2z/δ)`
+rather than `exp(-z/δ)`.
+
+**A void is a third as visible as a black slab, and it absorbs nothing.** It
+removes light by carrying photons in a straight line to its far wall, well
+below the depth anything returns from — a light pipe pointing away from the
+detector. The note predicted cavities would perturb strongly; the sign and the
+size are now measured.
+
+**The floor is a budget, not a physical limit.** The shaded band is three times
+the Monte Carlo noise floor at 40 000 photons, and everything below it is
+noise that a log axis renders as a convincing curve. It falls as `1/sqrt(N)`,
+so four times the photons buys about another third of a penetration depth —
+which is exactly why the deep cases run on a GPU.
 
 ## The figures
 
