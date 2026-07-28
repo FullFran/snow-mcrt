@@ -34,8 +34,129 @@ import numpy as np
 from snow_mcrt.domain.diffusion import DiffusionParameters
 from snow_mcrt.domain.geometry import Box
 from snow_mcrt.domain.transport import TransportConfig
-from snow_mcrt.domain.transport3d import BuriedObject, run_transport_3d
+from snow_mcrt.domain.transport3d import (
+    BuriedObject,
+    log_radial_edges,
+    run_transport_3d,
+)
 from snow_mcrt.ports.backend import Backend
+
+
+@dataclass(frozen=True)
+class ContrastProfile:
+    """Contrast against source-detector separation, at one burial depth.
+
+    This is the measurement, and the total return is the shadow of it. Light
+    that comes back close to the source never went deep enough to meet
+    anything; light that comes back far away had to travel through the depth
+    the object occupies. **The separation is a depth selector**, which is the
+    whole physical basis of the method, and integrating over it throws that
+    away.
+
+    Args:
+        rho_m: Separation at each bin centre, metres.
+        plain: ``R(rho)`` with nothing buried, m^-2.
+        with_object: ``R(rho)`` with the object, m^-2.
+        mean_path_plain_m: Mean optical path returning at each separation
+            with nothing buried.
+        mean_path_object_m: The same with the object.
+        n_photons: Photons per run, which sets the per-bin noise.
+        penetration_depth_m: ``delta`` of the snowpack.
+        transport_mfp_m: ``1 / (mu_a + mu_s')``.
+        depth_m: Depth of the object's top face.
+    """
+
+    rho_m: np.ndarray
+    plain: np.ndarray
+    with_object: np.ndarray
+    mean_path_plain_m: np.ndarray
+    mean_path_object_m: np.ndarray
+    n_photons: int
+    penetration_depth_m: float
+    transport_mfp_m: float
+    depth_m: float
+
+    @property
+    def sampled(self) -> np.ndarray:
+        """Bins both runs actually reached. An empty bin is not a zero."""
+        return (self.plain > 0) & (self.with_object >= 0)
+
+    @property
+    def contrast(self) -> np.ndarray:
+        """``(R_object - R_plain) / R_plain`` at each separation."""
+        return np.divide(
+            self.with_object - self.plain,
+            self.plain,
+            out=np.full_like(self.plain, np.nan),
+            where=self.plain > 0,
+        )
+
+    @property
+    def sigma(self) -> np.ndarray:
+        """One-sigma noise on the contrast, bin by bin.
+
+        Both runs are Poisson in the weight arriving, and the ratio carries
+        both. This is what makes a far bin's spectacular contrast worthless:
+        the signal grows towards 100% while the bin empties, and only the
+        product of the two decides anything.
+        """
+        total = self.plain + self.with_object
+        return np.divide(
+            np.sqrt(np.maximum(total, 0.0) / self.n_photons),
+            self.plain,
+            out=np.full_like(self.plain, np.inf),
+            where=self.plain > 0,
+        )
+
+    @property
+    def snr(self) -> np.ndarray:
+        """``|contrast| / sigma``. What actually decides a detection."""
+        return np.abs(self.contrast) / self.sigma
+
+    @property
+    def rho_in_penetration_depths(self) -> np.ndarray:
+        return self.rho_m / self.penetration_depth_m
+
+    @property
+    def best(self) -> int:
+        """Index of the separation that detects best.
+
+        Not the largest contrast -- that is always the farthest bin, where
+        the object blocks everything and almost nothing arrives.
+        """
+        snr = np.where(np.isfinite(self.snr), self.snr, -np.inf)
+        return int(np.argmax(snr))
+
+    @property
+    def path_contrast(self) -> np.ndarray:
+        """Fractional change in mean optical path at each separation.
+
+        The second, independent channel. An absorber removes the light that
+        went deepest, so the light that survives came back *sooner* -- the
+        mean path falls even where the intensity change is ambiguous. A
+        time-resolved instrument measures this and the intensity separately.
+        """
+        return np.divide(
+            self.mean_path_object_m - self.mean_path_plain_m,
+            self.mean_path_plain_m,
+            out=np.full_like(self.plain, np.nan),
+            where=np.isfinite(self.mean_path_plain_m)
+            & (self.mean_path_plain_m > 0),
+        )
+
+    def columns(self) -> dict[str, np.ndarray]:
+        return {
+            "rho_m": self.rho_m,
+            "rho_in_penetration_depths": self.rho_in_penetration_depths,
+            "reflectance_plain_per_m2": self.plain,
+            "reflectance_object_per_m2": self.with_object,
+            "contrast": self.contrast,
+            "sigma": self.sigma,
+            "snr": self.snr,
+            "mean_path_plain_m": self.mean_path_plain_m,
+            "mean_path_object_m": self.mean_path_object_m,
+            "path_contrast": self.path_contrast,
+        }
 
 
 @dataclass(frozen=True)
@@ -99,6 +220,90 @@ class DepthSweep:
             # this column exists to prevent.
             "noise_floor": np.full_like(self.contrast, self.noise_floor),
         }
+
+
+def measure_contrast_profile(
+    backend: Backend,
+    single_scattering_albedo: float,
+    asymmetry: float,
+    extinction_coefficient: float,
+    depth_m: float,
+    half_width_m: float = 0.10,
+    thickness_m: float = 0.20,
+    object_extinction: float = 1e5,
+    object_albedo: float = 0.0,
+    object_index: float = 1.31,
+    config: TransportConfig | None = None,
+    surface_index: float = 1.31,
+    inner_mfp: float = 1.0,
+    outer_depths: float = 8.0,
+    n_bins: int = 16,
+) -> ContrastProfile:
+    """Run the snowpack with and without the object, resolved by separation.
+
+    Both runs share a seed, so a difference between them is the object rather
+    than the realisation.
+
+    Args:
+        depth_m: Depth of the object's top face.
+        inner_mfp: Innermost bin, in transport mean free paths.
+        outer_depths: Outermost bin, in penetration depths.
+        n_bins: Radial bins.
+
+    Returns:
+        The two profiles, their contrast, its noise, and the path lengths.
+    """
+    config = config or TransportConfig()
+    parameters = DiffusionParameters.from_optical_properties(
+        single_scattering_albedo,
+        asymmetry,
+        extinction_coefficient,
+        refractive_index=surface_index,
+    )
+    edges = log_radial_edges(
+        inner_mfp * parameters.transport_mean_free_path,
+        outer_depths * parameters.penetration_depth,
+        n_bins,
+    )
+
+    def trace(obj):
+        return run_transport_3d(
+            backend,
+            extinction_coefficient,
+            single_scattering_albedo,
+            asymmetry,
+            config=config,
+            incidence="collimated",
+            surface_index=surface_index,
+            radial_edges_m=edges,
+            obj=obj,
+        )
+
+    plain = trace(None)
+    buried = trace(
+        BuriedObject(
+            Box(
+                lower=np.array([-half_width_m, -half_width_m, depth_m]),
+                upper=np.array(
+                    [half_width_m, half_width_m, depth_m + thickness_m]
+                ),
+            ),
+            extinction_coefficient=object_extinction,
+            single_scattering_albedo=object_albedo,
+            refractive_index=object_index,
+        )
+    )
+    return ContrastProfile(
+        rho_m=plain.bin_centres_m,
+        plain=plain.reflectance,
+        with_object=buried.reflectance,
+        mean_path_plain_m=plain.mean_path_m,
+        mean_path_object_m=buried.mean_path_m,
+        n_photons=config.n_photons,
+        penetration_depth_m=parameters.penetration_depth,
+        transport_mfp_m=parameters.transport_mean_free_path,
+        depth_m=depth_m,
+    )
 
 
 def sweep_burial_depth(

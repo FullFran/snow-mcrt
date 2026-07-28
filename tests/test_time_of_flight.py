@@ -25,12 +25,13 @@ from snow_mcrt.domain.transport3d import log_radial_edges, run_transport_3d
 OMEGA, G, BETA = 0.98, 0.5, 500.0
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def backend():
     return NumpyBackend()
 
 
-@pytest.fixture
+# Module-scoped for the same reason: one run, read by seven tests.
+@pytest.fixture(scope="module")
 def result(backend):
     return run_transport_3d(
         backend,

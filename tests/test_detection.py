@@ -19,12 +19,14 @@ from snow_mcrt.domain.transport import TransportConfig
 OMEGA, G, BETA = 0.99, 0.85, 1000.0
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def backend():
     return NumpyBackend()
 
 
-@pytest.fixture
+# Module-scoped. This is a full transport run and every test in the file
+# reads it; at function scope pytest recomputes it once per test.
+@pytest.fixture(scope="module")
 def sweep(backend):
     return sweep_burial_depth(
         backend,
