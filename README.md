@@ -156,6 +156,7 @@ src/snow_mcrt/
     analytic.py    closed-form solutions -- the oracle
   ports/         backend (NumPy/CuPy), Mie solver, optical data
   adapters/      NumPy is the oracle, not a fallback; CuPy; miepython
+                 plus a caching decorator over the Mie port
   application/   one use case per research question
   infra/         CSV and manifest writers
 scripts/         run (headless, draws nothing) and plot (never simulates)
@@ -208,7 +209,7 @@ kaggle kernels output fran17/snow-mcrt-gpu-validation -p results/kaggle
 
 ```bash
 uv venv && uv pip install -e '.[dev]'
-pytest                                    # 181 passed, 4 skipped without CUDA
+pytest                                    # 241 passed, 4 skipped without CUDA
 
 python scripts/run_albedo.py --output data/reference     # compute, draw nothing
 python scripts/plot_albedo.py --output docs/figures      # draw, compute nothing
@@ -218,6 +219,15 @@ That split is deliberate. `run_albedo.py` opens no windows, so it runs
 unchanged in a batch job; `plot_albedo.py` reads committed CSVs, so a figure
 can be restyled without waiting on any physics. Every run writes a manifest
 recording every parameter that produced it, seed included.
+
+Mie evaluation at snow size parameters is the expensive part, and it repeats:
+of the 19 578 `(m, x)` points the detectability figures request, only 1 258 are
+distinct. Every run script memoises them, keyed on the exact bits of the input
+so a hit can only ever return what the solver itself would have. `run_albedo.py`
+goes from 237 s to 0.6 s on a rerun, with the output CSVs byte-for-byte
+identical. Pass `--no-cache` to evaluate everything from scratch; the table
+lives in `$SNOW_MCRT_CACHE_DIR` (default `~/.cache/snow-mcrt`), never in the
+working tree.
 
 CuPy is optional (`pip install -e '.[gpu]'`). Without it the GPU tests skip and
 everything else runs.

@@ -75,6 +75,69 @@ alive-mask, exactly as replicas are an axis in a parallel-tempering lattice
 simulation. A single photon traced to completion and then the next is a
 different program, not a slower one.
 
+## The Mie cache is a decorator over the port
+
+The claim above — that Mie evaluation is milliseconds and the transport is
+where the time goes — is true per *call* and misleading per *run*. Measured on
+this repository, regenerating the four detectability figures spends 62 seconds
+almost entirely inside `miepython`, and `run_albedo.py` spends 237.
+
+The reason is not that any single evaluation is slow. It is that the same
+evaluation is requested over and over. `figure_detectability_map` sweeps black
+carbon loading across a fixed ice grain population, so the ice Mie table is
+identical on every iteration; the impurity is the only thing that changed.
+Counted directly: of the 19 578 `(m, x)` points that one script asks for,
+**1 258 are distinct**. Ninety-four percent of the work was already redundant
+*within a single process*, before any question of reruns.
+
+So `adapters/cached_mie_solver.py` wraps the port rather than modifying the
+solver. `CachedMieSolver` implements `MieSolver`, holds another `MieSolver`,
+and memoises `efficiencies` in memory and on disk. `domain/` is untouched and
+cannot tell the difference; a run drops the caching by not wrapping, and
+`--no-cache` on every script does exactly that.
+
+**The key is the exact bits of `(Re m, Im m, x)`.** Not rounded, and not a
+hash over the whole array. Both choices are load-bearing:
+
+- Exact bits mean a hit is only possible on bit-identical input, so the cache
+  cannot introduce numerical error. It returns precisely what the wrapped
+  solver would have returned, or it calls the wrapped solver. There is no
+  third outcome, and no tolerance to argue about later. A tolerant key would
+  be a second, silent error source stacked on top of the transport noise —
+  in a codebase whose whole point is validating against published benchmarks
+  to a stated residual, that trade is not available.
+- Per-element keys mean extending a wavelength grid costs only the new points.
+  A whole-array hash would discard the entire table whenever one endpoint
+  moved, which is precisely what happens while a figure is being tuned.
+
+Grids here come from `np.linspace`/`np.logspace` and `LogNormalGrainSizes`,
+driven by manifest parameters, so they reproduce bit-for-bit and exact keys
+hit. A grid arrived at another way simply misses, and a miss is always correct.
+
+Measured end to end, with the CSVs compared byte for byte against an uncached
+run:
+
+| script | uncached | first cached run | rerun |
+| ------ | -------- | ---------------- | ----- |
+| `plot_detectability.py` | 61.7 s | 6.2 s | 2.5 s |
+| `run_albedo.py` | 237.4 s | 210.1 s | 0.6 s |
+
+The two columns measure different things. `plot_detectability.py` gains ten
+times on its *first* run, because its redundancy is within the process.
+`run_albedo.py` gains almost nothing there — its nine curves genuinely need
+different grain populations — and everything on the rerun.
+
+The cache lives outside the working tree (`SNOW_MCRT_CACHE_DIR`, else the XDG
+cache home), because a cache under the repository is a cache that eventually
+lands in a commit. It is an optimisation and fails like one: a corrupt,
+truncated, or version-mismatched file costs time and never a run. Saves merge
+with what is already on disk and land through `os.replace`, so two scripts
+running at once neither tear a file nor erase each other's work.
+
+`phase_function` is deliberately not cached. An entry is an array over the
+angle grid rather than three floats, and nothing in the spectral pipeline
+calls it in a loop — a lot of disk for no measured time.
+
 ## Conventions fixed once, at the boundary
 
 Two of them, because both are silent when wrong.
@@ -417,6 +480,11 @@ touch:
 - `test_analytic.py` — limits the oracle must satisfy (a conservative medium
   reflects everything; a purely absorbing one reflects nothing) and values a
   snow-optics reader recognises.
+- `test_cached_mie_solver.py` — the caching decorator, checked against a
+  counting stub rather than the real solver. The question is not whether Mie
+  theory is right (`test_mie.py` owns that) but whether the wrapper returned
+  exactly what the wrapped solver would have and skipped calling it twice. A
+  stub makes both observable; the real solver makes neither.
 - `test_backends.py` — the port contract, checked against both adapters. The
   CuPy *numerical* tests skip without CUDA; the *contract* tests, including
   that `CupyBackend` refuses to construct when CuPy is absent, run everywhere.
