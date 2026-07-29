@@ -28,6 +28,7 @@ and shared -- the same seed, so the two differ by the object and nothing else.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterator
 
 import numpy as np
 
@@ -222,7 +223,7 @@ class DepthSweep:
         }
 
 
-def sweep_contrast_profiles(
+def iter_contrast_profiles(
     backend: Backend,
     single_scattering_albedo: float,
     asymmetry: float,
@@ -238,8 +239,8 @@ def sweep_contrast_profiles(
     inner_mfp: float = 1.0,
     outer_depths: float = 6.0,
     n_bins: int = 14,
-) -> list[ContrastProfile]:
-    """One profile per burial depth, sharing a single reference run.
+) -> Iterator[ContrastProfile]:
+    """Yield one profile per burial depth, sharing a single reference run.
 
     The snowpack with nothing in it does not depend on where the object would
     have been, so running it once per depth was pure waste. Worse, it put an
@@ -247,10 +248,14 @@ def sweep_contrast_profiles(
     to a comparison whose entire job is to be quiet: with a shared reference
     the only thing that differs between two depths is the object.
 
-    Halves the cost of a sweep, which matters because each run is a full
-    transport solution.
+    **A generator, not a list, and that is the point.** A sweep is hours of
+    transport under a hard wall-clock limit, and a function that computes
+    every depth before returning any of them yields nothing at all when the
+    limit arrives. Yielding lets the caller write each profile the moment it
+    exists, so a run that is cut short still leaves the depths it finished.
+    This cost a twelve-hour GPU session that produced no output whatsoever.
 
-    Returns:
+    Yields:
         A profile per entry in ``depths_m``, in that order.
     """
     config = config or TransportConfig()
@@ -280,7 +285,6 @@ def sweep_contrast_profiles(
         )
 
     plain = trace(None)
-    profiles = []
     for depth in np.atleast_1d(np.asarray(depths_m, dtype=float)):
         buried = trace(
             BuriedObject(
@@ -295,20 +299,26 @@ def sweep_contrast_profiles(
                 refractive_index=object_index,
             )
         )
-        profiles.append(
-            ContrastProfile(
-                rho_m=plain.bin_centres_m,
-                plain=plain.reflectance,
-                with_object=buried.reflectance,
-                mean_path_plain_m=plain.mean_path_m,
-                mean_path_object_m=buried.mean_path_m,
-                n_photons=config.n_photons,
-                penetration_depth_m=parameters.penetration_depth,
-                transport_mfp_m=parameters.transport_mean_free_path,
-                depth_m=float(depth),
-            )
+        yield ContrastProfile(
+            rho_m=plain.bin_centres_m,
+            plain=plain.reflectance,
+            with_object=buried.reflectance,
+            mean_path_plain_m=plain.mean_path_m,
+            mean_path_object_m=buried.mean_path_m,
+            n_photons=config.n_photons,
+            penetration_depth_m=parameters.penetration_depth,
+            transport_mfp_m=parameters.transport_mean_free_path,
+            depth_m=float(depth),
         )
-    return profiles
+
+
+def sweep_contrast_profiles(*args, **kwargs) -> list[ContrastProfile]:
+    """Every profile at once, for callers that are not racing a clock.
+
+    Convenience over :func:`iter_contrast_profiles`. Anything running under a
+    wall-clock limit should use the generator and write as it goes.
+    """
+    return list(iter_contrast_profiles(*args, **kwargs))
 
 
 def measure_contrast_profile(

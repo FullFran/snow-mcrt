@@ -304,7 +304,7 @@ def detection_profiles() -> dict:
     from snow_mcrt.adapters.cupy_backend import CupyBackend
     from snow_mcrt.adapters.miepython_solver import MiepythonSolver
     from snow_mcrt.adapters.tabulated_constants import TabulatedConstants
-    from snow_mcrt.application.detection import sweep_contrast_profiles
+    from snow_mcrt.application.detection import iter_contrast_profiles
     from snow_mcrt.domain.diffusion import DiffusionParameters
     from snow_mcrt.domain.medium import (
         BLACK_CARBON,
@@ -338,26 +338,9 @@ def detection_profiles() -> dict:
         omega, g, beta, refractive_index=1.31
     ).penetration_depth
 
-    depths = np.array([0.15, 0.35, 0.6, 1.0, 1.5, 2.2]) * delta
-    started = time.time()
-    # delta_scaled=False because the path lengths are an output here. Delta
-    # scaling preserves the diffusion limit but not the geometry, and a
-    # time-of-flight number from a scaled medium is not one.
-    profiles = sweep_contrast_profiles(
-        backend,
-        omega,
-        g,
-        beta,
-        depths_m=depths,
-        config=TransportConfig(
-            n_photons=1_000_000, seed=11, max_scatters=200_000, delta_scaled=False
-        ),
-    )
-    elapsed = round(time.time() - started, 1)
-
-    rows = []
-    for profile in profiles:
-        path = OUTPUT / f"detection-profile-{profile.depth_m / delta:.2f}delta.csv"
+    def write(profile, tag: str) -> dict:
+        """Write one profile and summarise it. Called the moment it exists."""
+        path = OUTPUT / f"detection-{tag}-{profile.depth_m / delta:.2f}delta.csv"
         with path.open("w", newline="") as handle:
             writer = csv.writer(handle)
             columns = profile.columns()
@@ -371,6 +354,7 @@ def detection_profiles() -> dict:
             (profile.with_object.sum() - profile.plain.sum()) / profile.plain.sum()
         )
         row = {
+            "channel": tag,
             "depth_m": profile.depth_m,
             "depth_in_penetration_depths": profile.depth_m / delta,
             "contrast_integrated": integrated,
@@ -384,18 +368,68 @@ def detection_profiles() -> dict:
             "gain_over_integrating": abs(float(profile.contrast[best]) / integrated)
             if integrated
             else float("nan"),
+            "seconds": round(time.time() - started, 1),
         }
-        rows.append(row)
         print(json.dumps(row), flush=True)
+        return row
 
-    return {
-        "detection_profiles": {
-            "penetration_depth_cm": delta * 100,
-            "co_albedo": 1.0 - omega,
-            "seconds": elapsed,
-            "points": rows,
+    started = time.time()
+    rows = []
+
+    def snapshot() -> dict:
+        """What the manifest should say if the run stops right now.
+
+        Carries the snowpack with the points, not just the points. A partial
+        file listing contrasts against depths in metres, with no penetration
+        depth to divide by, is a file nobody can read six months later.
+        """
+        return {
+            "detection_profiles": {
+                "penetration_depth_cm": delta * 100,
+                "co_albedo": 1.0 - omega,
+                "asymmetry": g,
+                "complete": False,
+                "seconds": round(time.time() - started, 1),
+                "points": rows,
+            }
         }
-    }
+
+    # The intensity channel. Delta-scaled, because the contrast is a ratio of
+    # intensities and does not care about path length -- and because at
+    # g = 0.889 turning the scaling off multiplies the step count several
+    # times over. Calibrating the cost of an unscaled run against scaled ones
+    # is what overran the previous session by a factor nobody budgeted for.
+    for profile in iter_contrast_profiles(
+        backend,
+        omega,
+        g,
+        beta,
+        depths_m=np.array([0.15, 0.35, 0.6, 1.0, 1.5, 2.2]) * delta,
+        config=TransportConfig(n_photons=500_000, seed=11, max_scatters=200_000),
+    ):
+        rows.append(write(profile, "intensity"))
+        _checkpoint(snapshot())
+
+    # The path channel, and only two depths of it. Path length is meaningless
+    # under delta scaling -- the scaled medium reaches the same place in
+    # fewer, longer steps -- so this one has to run unscaled, and unscaled is
+    # expensive. Two depths bracket the useful range; six would not finish.
+    for profile in iter_contrast_profiles(
+        backend,
+        omega,
+        g,
+        beta,
+        depths_m=np.array([0.35, 1.0]) * delta,
+        config=TransportConfig(
+            n_photons=200_000, seed=11, max_scatters=400_000, delta_scaled=False
+        ),
+    ):
+        rows.append(write(profile, "path"))
+        _checkpoint(snapshot())
+
+    final = snapshot()
+    final["detection_profiles"]["complete"] = True
+    return final
 
 
 def _constants_path() -> str:
@@ -405,14 +439,47 @@ def _constants_path() -> str:
     return str(CONSTANTS)
 
 
+_MANIFEST = OUTPUT / "gpu-validation.json"
+_STATE: dict = {}
+
+
+def _checkpoint(update: dict) -> None:
+    """Merge into the manifest and write it out, now.
+
+    A kernel here is hours of GPU under a hard wall-clock limit, and Kaggle
+    keeps the output of a session it cancelled. Writing the manifest once at
+    the end therefore turns "ran out of time" into "produced nothing" -- which
+    is exactly what happened on the previous attempt: the run completed five
+    hours of work and delivered none of it.
+
+    Cheap enough to call after every profile. The file is small and the run is
+    not.
+    """
+    _STATE.update(update)
+    _MANIFEST.write_text(json.dumps(_STATE, indent=2) + "\n")
+
+
+# Which sections to run. The diffusion comparison is five hours of GPU whose
+# results are already committed under results/kaggle/ and do not change, so
+# re-running it only eats the budget the new work needs. Restore the full
+# tuple when something upstream of it changes.
+SECTIONS = ("detection",)
+
+_ALL_SECTIONS = {
+    "backends": cross_check_backends,
+    "deep": clean_snow_visible,
+    "diffusion": diffusion_validity,
+    "detection": detection_profiles,
+}
+
+
 def main() -> int:
     install()
-    manifest = {"environment": report_environment()}
-    manifest.update(cross_check_backends())
-    manifest.update(clean_snow_visible())
-    manifest.update(diffusion_validity())
-    manifest.update(detection_profiles())
-    (OUTPUT / "gpu-validation.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    _checkpoint({"environment": report_environment(), "sections": list(SECTIONS)})
+    for name in SECTIONS:
+        section = _ALL_SECTIONS[name]
+        print(f"--- {name} ---", flush=True)
+        _checkpoint(section())
     print(f"written to {OUTPUT / 'gpu-validation.json'}", flush=True)
     return 0
 

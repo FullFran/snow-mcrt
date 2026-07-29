@@ -15,6 +15,7 @@ import pytest
 
 from snow_mcrt.adapters.numpy_backend import NumpyBackend
 from snow_mcrt.application.detection import (
+    iter_contrast_profiles,
     measure_contrast_profile,
     sweep_contrast_profiles,
 )
@@ -88,6 +89,60 @@ class TestItAgreesWithTheSingleShotVersion:
         np.testing.assert_allclose(alone.plain, swept.plain)
         np.testing.assert_allclose(alone.with_object, swept.with_object)
         np.testing.assert_allclose(alone.rho_m, swept.rho_m)
+
+
+class TestItYieldsAsItGoes:
+    """The property whose absence cost a twelve-hour GPU session.
+
+    A sweep runs for hours under a hard wall-clock limit. A function that
+    computes every depth before returning any of them produces nothing at all
+    when the limit arrives -- not a partial result, nothing. The generator
+    exists so the caller can write each profile the moment it is finished.
+    """
+
+    def test_the_first_profile_arrives_before_the_last_is_computed(
+        self, monkeypatch
+    ):
+        import snow_mcrt.application.detection as detection
+
+        runs = []
+        original = detection.run_transport_3d
+
+        def counting(*args, **kwargs):
+            runs.append(kwargs.get("obj"))
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(detection, "run_transport_3d", counting)
+        stream = iter_contrast_profiles(
+            NumpyBackend(),
+            OMEGA,
+            G,
+            BETA,
+            depths_m=np.array([0.3, 0.6, 0.9]) * DELTA,
+            config=CHEAP,
+            n_bins=5,
+        )
+        first = next(stream)
+        # The reference plus exactly one object. If this reads 4, the sweep
+        # ran everything up front and a cancelled job would lose it all.
+        assert len(runs) == 2
+        assert first.depth_m == pytest.approx(0.3 * DELTA)
+
+        next(stream)
+        assert len(runs) == 3
+
+    def test_nothing_runs_until_the_first_value_is_asked_for(self):
+        # Building the generator must not trace a single photon.
+        stream = iter_contrast_profiles(
+            NumpyBackend(),
+            OMEGA,
+            G,
+            BETA,
+            depths_m=np.array([0.3]) * DELTA,
+            config=CHEAP,
+            n_bins=5,
+        )
+        assert hasattr(stream, "__next__")
 
 
 class TestItStaysCheap:
