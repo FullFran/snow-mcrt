@@ -156,6 +156,58 @@ overwhelmingly more*, so adding soot changes nothing measurable. In the
 visible, ice is nearly transparent and even a trace of a strong absorber
 dominates the budget (Warren & Wiscombe 1980).
 
+### The mechanism, from Mie to the band
+
+The tables above are a correlation until the chain behind them is written down.
+It is short, and it is the canonical one — grain radius enters through Mie
+theory, which returns the three numbers transport actually consumes:
+
+```
+radius r  ──Mie──▶  ω (single-scattering albedo)
+                    g (asymmetry)                ──▶  transport  ──▶  albedo
+                    σ_ext (extinction)
+```
+
+Computed from `data/ice/warren_brandt_2008.dat` at snow density 300 kg/m³:
+
+**560 nm — ice is nearly transparent, `k = 2.8 × 10⁻⁹`**
+
+| Radius | 1 − ω | σ_ext (m⁻¹) | Absorption length 1/(σ·(1−ω)) |
+|---|---|---|---|
+| 50 µm | 4.2 × 10⁻⁶ | 6681 | **35.95 m** |
+| 100 µm | 8.0 × 10⁻⁶ | 3326 | **37.55 m** |
+| 250 µm | 2.0 × 10⁻⁵ | 1328 | **37.91 m** |
+| 500 µm | 4.0 × 10⁻⁵ | 662 | **38.01 m** |
+| 1000 µm | 7.9 × 10⁻⁵ | 331 | **38.07 m** |
+
+**Two effects cancel.** The co-albedo grows roughly in proportion to the
+radius, because absorption within a single grain scales with the path through
+it. The extinction coefficient falls roughly as its inverse, because at fixed
+density larger grains means fewer of them. Their product — which is what sets
+how far a photon travels before being absorbed — barely moves: 36 to 38 metres
+across a factor of twenty in radius.
+
+That cancellation *is* the reason the visible band cannot size a grain. It is
+not that the band is insensitive by construction; it is that the physics
+conspires to make the medium look the same.
+
+**1610 nm — ice absorbs, `k = 2.7 × 10⁻⁴`**
+
+| Radius | 1 − ω | Absorption length |
+|---|---|---|
+| 50 µm | 0.112 | **1.3 mm** |
+| 100 µm | 0.192 | 1.6 mm |
+| 250 µm | 0.331 | 2.3 mm |
+| 500 µm | 0.419 | 3.6 mm |
+| 1000 µm | 0.460 | **6.6 mm** |
+
+Here the cancellation breaks. The co-albedo saturates towards a limit rather
+than growing linearly, so it no longer offsets the falling extinction, and the
+absorption length grows fivefold with grain size. Larger grains mean a longer
+path inside absorbing ice, which means a darker snowpack.
+
+**That is the whole factor of eighteen in B11**, derived rather than observed.
+
 ### Why this matters
 
 The two parameters a snow retrieval wants act on **different bands**. That is
@@ -171,6 +223,28 @@ to invert. Grain size is retrieved from the shortwave band directly, not from
 an index built on top of it.
 
 ---
+
+### What is standard here and what is not
+
+The chain above — Mie for single scattering, then transport — is the canonical
+approach and has been since Wiscombe & Warren (1980). SNICAR, TARTES and
+BioSNICAR all do exactly this. **That is a feature.** A novel physics chain in
+a snow albedo model would more likely be a wrong one.
+
+What this repository does differently is not the physics:
+
+- **Full three-dimensional Monte Carlo transport** rather than two-stream or
+  delta-Eddington. The operational models approximate the transport; here it is
+  the reference, and the approximations are what get checked against it.
+- **A Fresnel surface and a buried object in three dimensions**, which is
+  outside what plane-parallel models can express at all.
+- **Cross-validation in two directions**: against van de Hulst in closed form
+  and against TARTES as an independent implementation, with the provenance of
+  every published curve committed under `data/reference/`.
+- **A grain size distribution by default** (`grain_sigma_g = 1.5`, not 1).
+  Monodisperse spheres support morphology-dependent resonances that spike
+  absorption more than tenfold at isolated wavelengths, producing spectral
+  features no real snowpack has.
 
 ## 5. Why no surrogate model, no emulator, no neural network
 
