@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    # La suite ejecuta transporte Monte Carlo de verdad y tarda unos minutos.
+    # El límite es una red de seguridad frente a un cuelgue, no un objetivo.
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Un entorno virtual dedicado por versión de la matriz. Sin él, uv
+      # resolvería contra el Python del sistema y las dos jobs correrían sobre
+      # el mismo intérprete, dejando la matriz sin efecto.
+      - name: Crear entorno con Python ${{ matrix.python-version }}
+        run: uv venv --python ${{ matrix.python-version }}
+
+      # Se instalan solo los extras 'dev'. 'gpu' (CuPy) no tiene sentido en un
+      # runner sin GPU, y 'validation' (TARTES) es opcional a propósito: sus
+      # tests se saltan cuando no está, que es lo que se quiere comprobar aquí.
+      - name: Instalar dependencias
+        run: uv pip install -e '.[dev]'
+
+      - name: Comprobar la versión de Python activa
+        run: uv run python -c "import sys; print(sys.version)"
+
+      - name: Ejecutar tests
+        run: uv run pytest -q

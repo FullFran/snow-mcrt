@@ -1,5 +1,8 @@
 # snow-mcrt
 
+[![CI](https://github.com/FullFran/snow-mcrt/actions/workflows/ci.yml/badge.svg)](https://github.com/FullFran/snow-mcrt/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Monte Carlo photon transport for light propagation in snow, validated against
 closed-form radiative transfer and the canonical snow-optics literature.
 
