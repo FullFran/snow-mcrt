@@ -125,6 +125,35 @@ visible albedo from 0.99 to the mid 0.95s — reproducing Warren & Wiscombe
 comparable darkening, which is why the field quotes carbon in ppb and dust in
 ppm.
 
+### What a satellite would see
+
+The model gives albedo against wavelength. An instrument gives a handful of
+numbers, each an integral against a detector's spectral response. Integrating
+over Sentinel-2 MSI and MODIS closes that gap, and the result is the spectral
+signature of snow in two numbers:
+
+| | B3 (560 nm) | B11 (1610 nm) | NDSI |
+| --- | --- | --- | --- |
+| Clean snow, r = 100 um | 0.980 | 0.055 | **0.894** |
+
+A factor of eighteen between green and shortwave infrared. That contrast, and
+not brightness, is what makes snow separable from cloud and rock, and it is why
+the operational threshold of NDSI > 0.4 works.
+
+The two parameters a retrieval wants turn out to act on **different bands**.
+Grain size moves B11 by a factor of eighteen from 50 to 1000 um while moving
+B3 by 5%. Black carbon takes B3 from 0.980 to 0.848 across three orders of
+magnitude of loading while leaving B11 at 0.0550 — unchanged to four decimal
+places. The Jacobian is close to diagonal, which is what makes a
+two-parameter inversion well posed rather than degenerate.
+
+The top-hat band approximation this ships with is measured rather than
+asserted: swapping each band for a Gaussian of matched full width at half
+maximum moves the answer by at most 0.004, in the widest band.
+
+Bands, index, separability, the papers behind each claim, and an explicit list
+of what is still missing: [`docs/remote-sensing.md`](docs/remote-sensing.md).
+
 ### What varies, and how deep light reaches
 
 ![Co-albedo and penetration depth](docs/figures/co-albedo-and-penetration.png)

@@ -9,3 +9,7 @@ outputs/
 
 # Entorno virtual local
 .venv/
+uv.lock
+
+# Salida de tooling local
+.atl/
