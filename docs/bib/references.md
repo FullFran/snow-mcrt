@@ -20,6 +20,16 @@ Canonical references for light propagation in snow and Monte Carlo radiative tra
 - Warren, S. G. (2019). Optical properties of ice and snow. *Philosophical Transactions of the Royal Society A*, 377, 20180161. DOI: [10.1098/rsta.2018.0161](https://doi.org/10.1098/rsta.2018.0161)
 - Kokhanovsky, A. A., & Zege, E. P. (2004). Scattering optics of snow. *Applied Optics*, 43(7), 1589–1602. DOI: [10.1364/AO.43.001589](https://doi.org/10.1364/AO.43.001589)
 
+## Remote sensing — bands, indices and retrieval
+
+Supporting [`docs/remote-sensing.md`](../remote-sensing.md).
+
+- **(benchmark)** Dozier, J. (1989). Spectral signature of alpine snow cover from the Landsat Thematic Mapper. *Remote Sensing of Environment*, 28, 9–22. DOI: [10.1016/0034-4257(89)90101-6](https://doi.org/10.1016/0034-4257\(89\)90101-6) — where the visible/SWIR contrast becomes an index.
+- **(benchmark)** Hall, D. K., Riggs, G. A., & Salomonson, V. V. (1995). Development of methods for mapping global snow cover using Moderate Resolution Imaging Spectroradiometer data. *Remote Sensing of Environment*, 54(2), 127–140. DOI: [10.1016/0034-4257(95)00137-P](https://doi.org/10.1016/0034-4257\(95\)00137-P) — the operational NDSI > 0.4 threshold.
+- Nolin, A. W., & Dozier, J. (2000). A hyperspectral method for remotely sensing the grain size of snow. *Remote Sensing of Environment*, 74(2), 207–216. DOI: [10.1016/S0034-4257(00)00111-5](https://doi.org/10.1016/S0034-4257\(00\)00111-5)
+- Painter, T. H., et al. (2009). Retrieval of subpixel snow-covered area, grain size, and albedo from MODIS. *Remote Sensing of Environment*, 113(4), 868–879. DOI: [10.1016/j.rse.2009.01.001](https://doi.org/10.1016/j.rse.2009.01.001)
+- Drusch, M., et al. (2012). Sentinel-2: ESA's optical high-resolution mission for GMES operational services. *Remote Sensing of Environment*, 120, 25–36. DOI: [10.1016/j.rse.2011.11.026](https://doi.org/10.1016/j.rse.2011.11.026) — the band definitions in `domain/sensor.py`.
+
 ## Open reference implementations
 
 - **(code)** **SNICAR** — Flanner, M. G., & Zender, C. S. (2005, 2006). Snowpack radiative transfer model. Web: https://snow.engin.umich.edu
